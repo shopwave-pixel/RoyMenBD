@@ -233,6 +233,40 @@ class OperationsServiceClass {
   getEmailTemplates(): EmailTemplate[] {
     return [
       {
+        id: 'tmpl_admin_order',
+        name: 'Admin New Order Notification',
+        category: 'Order',
+        subject: '🚨 New Order Received - #{{ORDER_ID}}',
+        variables: ['{{ORDER_ID}}', '{{CUSTOMER_NAME}}', '{{CUSTOMER_EMAIL}}', '{{CUSTOMER_PHONE}}', '{{TOTAL_AMOUNT}}', '{{PAYMENT_METHOD}}', '{{ORDER_DATE}}', '{{ORDER_URL}}'],
+        bodyHtml: `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#09090b;color:#f4f4f5;padding:24px;border-radius:16px;border:1px solid #27272a;">
+          <p style="margin-top:0;font-size:15px;">Hello Admin,</p>
+          <p style="font-size:15px;color:#d4d4d8;">A new order has been received on <strong style="color:#ffffff;">ROYMEN</strong>.</p>
+          
+          <div style="background-color:#18181b;border:1px solid #3f3f46;border-radius:12px;padding:20px;margin:20px 0;">
+            <h3 style="margin-top:0;margin-bottom:14px;color:#f59e0b;font-size:14px;border-bottom:1px solid #3f3f46;padding-bottom:8px;text-transform:uppercase;letter-spacing:1px;">Order Information</h3>
+            <p style="margin:0 0 10px;"><strong>Order ID:</strong><br><span style="color:#ffffff;font-size:16px;font-weight:700;">#{{ORDER_ID}}</span></p>
+            <p style="margin:0 0 10px;"><strong>Customer:</strong><br><span style="color:#ffffff;">{{CUSTOMER_NAME}}</span></p>
+            <p style="margin:0 0 10px;"><strong>Customer Email:</strong><br><span style="color:#38bdf8;">{{CUSTOMER_EMAIL}}</span></p>
+            <p style="margin:0 0 10px;"><strong>Customer Phone:</strong><br><span style="color:#38bdf8;">{{CUSTOMER_PHONE}}</span></p>
+            <p style="margin:0 0 10px;"><strong>Total Amount:</strong><br><span style="color:#f59e0b;font-size:18px;font-weight:800;">৳{{TOTAL_AMOUNT}}</span></p>
+            <p style="margin:0 0 10px;"><strong>Payment Method:</strong><br><span style="color:#ffffff;">{{PAYMENT_METHOD}}</span></p>
+            <p style="margin:0;"><strong>Order Date:</strong><br><span style="color:#ffffff;">{{ORDER_DATE}}</span></p>
+          </div>
+
+          <p style="font-size:14px;color:#d4d4d8;">Please review and process this order from the Admin Dashboard.</p>
+
+          <p style="margin:20px 0;">
+            <strong>View Order:</strong><br>
+            <a href="{{ORDER_URL}}" target="_blank" style="display:inline-block;padding:12px 24px;background-color:#f59e0b;color:#09090b;font-weight:700;text-decoration:none;border-radius:8px;margin-top:8px;">View Order #{{ORDER_ID}}</a>
+          </p>
+
+          <p style="margin-bottom:4px;">Thank you,</p>
+          <p style="margin-top:0;font-weight:700;color:#f59e0b;letter-spacing:1px;">ROYMEN<br><span style="font-weight:400;font-size:12px;color:#a1a1aa;">Wear Confidence</span></p>
+
+          <p style="font-size:12px;color:#71717a;border-top:1px solid #27272a;padding-top:12px;margin-top:24px;">This is an automated system notification.<br>Please do not reply to this email.</p>
+        </div>`
+      },
+      {
         id: 'tmpl_welcome',
         name: 'Welcome Email',
         category: 'Authentication',
