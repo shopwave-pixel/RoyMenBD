@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { ShieldCheck } from 'lucide-react';
 import { StorageService } from './services/storageService';
 import {
   Product,
@@ -163,20 +164,71 @@ export default function App() {
 
   // If Admin View is active
   if (currentView === 'admin') {
+    if (currentUser && currentUser.role === 'admin') {
+      return (
+        <AdminLayout
+          activeTab={adminActiveTab}
+          onTabChange={setAdminActiveTab}
+          onCloseAdmin={() => setCurrentView('home')}
+        >
+          {adminActiveTab === 'overview' && <DashboardOverview onNavigateToTab={setAdminActiveTab} />}
+          {adminActiveTab === 'products' && <ProductsManager />}
+          {adminActiveTab === 'orders' && <OrdersManager />}
+          {adminActiveTab === 'sheets-sync' && <GoogleSheetsSync />}
+          {['coupons', 'reviews', 'banners', 'users', 'settings', 'analytics'].includes(adminActiveTab) && (
+            <AdminManagerTabs activeTab={adminActiveTab} />
+          )}
+        </AdminLayout>
+      );
+    }
+
+    // Access Denied for Customers or Unauthenticated Visitors
     return (
-      <AdminLayout
-        activeTab={adminActiveTab}
-        onTabChange={setAdminActiveTab}
-        onCloseAdmin={() => setCurrentView('home')}
-      >
-        {adminActiveTab === 'overview' && <DashboardOverview onNavigateToTab={setAdminActiveTab} />}
-        {adminActiveTab === 'products' && <ProductsManager />}
-        {adminActiveTab === 'orders' && <OrdersManager />}
-        {adminActiveTab === 'sheets-sync' && <GoogleSheetsSync />}
-        {['coupons', 'reviews', 'banners', 'users', 'settings', 'analytics'].includes(adminActiveTab) && (
-          <AdminManagerTabs activeTab={adminActiveTab} />
-        )}
-      </AdminLayout>
+      <div className="min-h-screen bg-zinc-950 text-white font-sans flex flex-col items-center justify-center p-6 text-center">
+        <div className="max-w-md w-full bg-zinc-900/90 border border-zinc-800 rounded-3xl p-8 shadow-2xl space-y-6">
+          <div className="w-16 h-16 bg-red-500/10 border border-red-500/30 rounded-2xl flex items-center justify-center mx-auto text-red-400">
+            <ShieldCheck className="w-8 h-8" />
+          </div>
+
+          <div className="space-y-2">
+            <span className="text-[10px] font-black uppercase tracking-[0.3em] text-red-400">Security Access Policy</span>
+            <h2 className="text-2xl font-black font-serif text-white uppercase tracking-wider">Access Denied</h2>
+            <p className="text-xs text-zinc-400 leading-relaxed">
+              {currentUser
+                ? `Logged in as customer (${currentUser.email}). Customer accounts do not have Administrator privileges.`
+                : 'Administrator authentication required. Please enter your email address via Account Sign In.'}
+            </p>
+          </div>
+
+          <div className="space-y-3 pt-2">
+            <button
+              onClick={() => setIsAuthOpen(true)}
+              className="w-full bg-amber-500 hover:bg-amber-400 text-black font-black py-3 rounded-xl uppercase text-xs tracking-wider transition-colors shadow-lg"
+            >
+              Sign In to Account
+            </button>
+            <button
+              onClick={() => setCurrentView('home')}
+              className="w-full bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold py-3 rounded-xl uppercase text-xs tracking-wider transition-colors"
+            >
+              Return to Website
+            </button>
+          </div>
+        </div>
+
+        <AuthModal
+          isOpen={isAuthOpen}
+          onClose={() => setIsAuthOpen(false)}
+          onAuthSuccess={usr => {
+            setCurrentUser(usr);
+            if (usr.role === 'admin') {
+              setCurrentView('admin');
+            } else {
+              setCurrentView('account');
+            }
+          }}
+        />
+      </div>
     );
   }
 

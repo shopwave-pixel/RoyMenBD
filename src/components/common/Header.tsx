@@ -202,16 +202,6 @@ export const Header: React.FC<HeaderProps> = ({
                 {currentUser ? currentUser.name : 'Account'}
               </span>
             </button>
-
-            {/* Admin Portal Toggle Button */}
-            <button
-              onClick={() => onNavigate('admin')}
-              className="hidden sm:flex items-center gap-1.5 bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-white px-3 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider shadow-md transition-all border border-amber-400/30"
-              title="Open Enterprise Admin Dashboard"
-            >
-              <ShieldCheck className="w-3.5 h-3.5" />
-              <span>Admin</span>
-            </button>
           </div>
         </div>
       </div>
@@ -261,13 +251,6 @@ export const Header: React.FC<HeaderProps> = ({
               className="text-left py-2 border-b border-zinc-900 hover:text-white"
             >
               Brand Story
-            </button>
-
-            <button
-              onClick={() => { onNavigate('admin'); setMobileMenuOpen(false); }}
-              className="text-left py-2 text-amber-400 font-bold flex items-center gap-2"
-            >
-              <ShieldCheck className="w-4 h-4" /> Admin Portal & Google Sheets Sync
             </button>
           </div>
         </div>

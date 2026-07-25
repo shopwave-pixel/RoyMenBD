@@ -130,14 +130,7 @@ export class StorageService {
   } {
     const normEmail = email.trim().toLowerCase();
 
-    // 1. Check Users sheet first
-    const users = this.getUsers();
-    const customer = users.find(u => u.email.toLowerCase() === normEmail && u.status === 'active' && u.role === 'customer');
-    if (customer) {
-      return { type: 'customer', user: customer };
-    }
-
-    // 2. If no active customer account found, check Admins sheet
+    // 1. Check Admins sheet first for priority Admin routing
     const admins = this.getAdmins();
     const admin = admins.find(a => a.email.toLowerCase() === normEmail);
     if (admin) {
@@ -154,7 +147,14 @@ export class StorageService {
       return { type: 'admin', adminAccount: admin };
     }
 
-    // 3. If email exists in neither sheet
+    // 2. Check active Customers
+    const users = this.getUsers();
+    const customer = users.find(u => u.email.toLowerCase() === normEmail && u.status === 'active' && u.role === 'customer');
+    if (customer) {
+      return { type: 'customer', user: customer };
+    }
+
+    // 3. New customer registration
     return { type: 'new_customer' };
   }
 

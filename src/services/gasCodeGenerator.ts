@@ -360,10 +360,10 @@ function doPost(e) {
       case 'POST_ORDER':
         var orderId = saveOrderToSheet(payload);
         payload.id = orderId;
-        // Automatically send Customer Order Confirmation Email
-        sendCustomerOrderConfirmationEmail(payload);
-        // Automatically send Admin New Order Notification Email
-        sendAdminNewOrderAlertEmail(payload);
+        // Automatically send Customer Order Confirmation Email directly
+        sendCustomerOrderConfirmation(payload);
+        // Automatically send Admin New Order Notification Email directly
+        sendAdminNewOrderNotification(payload);
         logAuditTrail('CUSTOMER', 'PLACE_ORDER', SHEETS.ORDERS, 'Order created: ' + orderId);
         return createJsonResponse({ orderId: orderId }, true, 'Order placed successfully.');
 
