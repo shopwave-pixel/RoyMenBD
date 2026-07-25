@@ -1,31 +1,43 @@
-// ROYMEN Enterprise Google Apps Script Generator
-// Produces single-file self-installing, self-healing, auto-migrating Code.gs for Google Sheets
+// ROYMEN Enterprise Google Apps Script Generator & Modular Build System
+// Provides Modular Source Files (Source Mode) and Enterprise Build Pipeline to produce Code.gs
 
-export function generateGoogleAppsScriptCode(): string {
-  return `/**
- * ==============================================================================
- * ROYMEN ENTERPRISE E-COMMERCE PLATFORM - ZERO-CONFIGURATION GAS BACKEND
- * BRAND: ROYMEN | TAGLINE: Wear Confidence. | COUNTRY: BANGLADESH
- * SPREADSHEET TABS: 30 ENTERPRISE SHEETS
- * VERSION: 2.0.0 (ZERO-CONFIG / AUTO-HEALING / AUTO-INSTALLER / PRODUCTION READY)
- * ==============================================================================
- * 
- * ZERO-CONFIGURATION INSTALLATION INSTRUCTIONS:
- * 1. Create a blank Google Spreadsheet.
- * 2. Click Extensions > Apps Script.
- * 3. Delete any default code and paste this entire code into Code.gs.
- * 4. Click 'Deploy' > 'New Deployment'.
- * 5. Select type: 'Web app'.
- * 6. Set Description: 'ROYMEN REST API v2'.
- * 7. Set 'Execute as': 'Me'.
- * 8. Set 'Who has access': 'Anyone' (Crucial for REST API access).
- * 9. Copy the generated Web App URL and paste it into ROYMEN config.ts / Admin panel.
- * 10. EVERYTHING ELSE HAPPENS AUTOMATICALLY ON FIRST BOOT!
+export interface GasSourceFile {
+  filename: string;
+  category: 'Core' | 'Auth & Security' | 'Catalog & Sales' | 'System & Utilities';
+  description: string;
+  code: string;
+}
+
+export interface BuildStats {
+  status: 'SUCCESS' | 'QUALITY_GATE_FAILED';
+  version: string;
+  dbVersion: string;
+  buildNumber: number;
+  buildHash: string;
+  timestamp: string;
+  modulesCount: number;
+  functionsCount: number;
+  linesCount: number;
+  qualityGatePassed: boolean;
+}
+
+export interface BuildResult {
+  success: boolean;
+  code: string;
+  stats: BuildStats;
+  issues: string[];
+}
+
+export const GAS_SOURCE_FILES: Record<string, GasSourceFile> = {
+  'Config.gs': {
+    filename: 'Config.gs',
+    category: 'Core',
+    description: 'Central app config, 30 sheet names, and database table schemas.',
+    code: `/**
+ * Config.gs - Central Configuration & Sheet Constant Schemas
+ * ROYMEN Enterprise E-Commerce Platform
  */
 
-// ==========================================
-// CENTRAL CONFIGURATION & SHEET CONSTANTS (30 SHEETS)
-// ==========================================
 var APP_CONFIG = {
   APP_NAME: "ROYMEN",
   TAGLINE: "Wear Confidence.",
@@ -103,98 +115,207 @@ var SCHEMAS = {
   '29_App_Settings': ['AppName', 'Tagline', 'CurrencySymbol', 'Country', 'SupportEmail', 'SupportPhone'],
   '30_Backup_Log': ['BackupID', 'SheetName', 'RowCount', 'Timestamp', 'Status']
 };
+`
+  },
+
+  'Utils.gs': {
+    filename: 'Utils.gs',
+    category: 'Core',
+    description: 'Core helper utilities, spreadsheet accessor, and JSON transformers.',
+    code: `/**
+ * Utils.gs - Spreadsheet Accessor & Helper Utilities
+ */
 
 function getActiveSpreadsheet() {
   return SpreadsheetApp.getActiveSpreadsheet();
 }
 
-// ==========================================
-// REST API ROUTER - GET
-// ==========================================
+function getSheetDataAsJson(sheetName) {
+  var ss = getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(sheetName);
+  if (!sheet) return [];
+
+  var data = sheet.getDataRange().getValues();
+  if (data.length < 2) return [];
+
+  var headers = data[0];
+  var rows = data.slice(1);
+
+  return rows.map(function(row) {
+    var obj = {};
+    headers.forEach(function(header, index) {
+      obj[header] = row[index];
+    });
+    return obj;
+  });
+}
+
+function generateUniqueId(prefix) {
+  var pfx = prefix || 'GEN';
+  return pfx + '-' + Date.now().toString(36) + '-' + Math.floor(1000 + Math.random() * 9000);
+}
+
+function slugifyText(text) {
+  if (!text) return '';
+  return text.toString().toLowerCase()
+    .replace(/\\s+/g, '-')
+    .replace(/[^\\w\\-]+/g, '')
+    .replace(/\\-\\-+/g, '-')
+    .replace(/^-+/, '')
+    .replace(/-+$/, '');
+}
+`
+  },
+
+  'Response.gs': {
+    filename: 'Response.gs',
+    category: 'Core',
+    description: 'Standardized JSON response formatting helpers for REST API.',
+    code: `/**
+ * Response.gs - Standardized REST API Response Formatter
+ */
+
+function createJsonResponse(data, success, message, extra) {
+  var isSuccess = (success !== undefined) ? Boolean(success) : true;
+  var msg = message || (isSuccess ? 'Operation completed successfully.' : 'Operation failed.');
+  
+  var payload = {
+    success: isSuccess,
+    message: msg,
+    data: data || null,
+    timestamp: new Date().toISOString(),
+    version: APP_CONFIG.VERSION,
+    dbVersion: APP_CONFIG.DB_VERSION
+  };
+
+  if (extra && typeof extra === 'object') {
+    for (var key in extra) {
+      payload[key] = extra[key];
+    }
+  }
+
+  return ContentService
+    .createTextOutput(JSON.stringify(payload))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function createErrorResponse(errorMessage, statusCode) {
+  var payload = {
+    success: false,
+    error: errorMessage || 'An unexpected server error occurred.',
+    timestamp: new Date().toISOString(),
+    version: APP_CONFIG.VERSION
+  };
+
+  return ContentService
+    .createTextOutput(JSON.stringify(payload))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+`
+  },
+
+  'Validation.gs': {
+    filename: 'Validation.gs',
+    category: 'Core',
+    description: 'Input sanitization, regex validators, and schema validators.',
+    code: `/**
+ * Validation.gs - Input Validation & Sanitization Engine
+ */
+
+function validateEmailAddress(email) {
+  if (!email || typeof email !== 'string') return false;
+  var re = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/;
+  return re.test(email.trim().toLowerCase());
+}
+
+function validatePhoneNumber(phone) {
+  if (!phone) return false;
+  var cleaned = phone.toString().replace(/[^0-9+]/g, '');
+  return cleaned.length >= 10;
+}
+
+function sanitizeInputString(str) {
+  if (!str) return '';
+  return str.toString().trim().replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+`
+  },
+
+  'Router.gs': {
+    filename: 'Router.gs',
+    category: 'Core',
+    description: 'REST API Request Router handling HTTP GET and POST requests.',
+    code: `/**
+ * Router.gs - Central REST API Request Router (GET & POST)
+ */
+
 function doGet(e) {
   var lock = LockService.getScriptLock();
   lock.tryLock(10000);
 
   try {
-    // 1. RUN ZERO-CONFIG FIRST BOOT, AUTO-INSTALLER & SELF-HEALING AUTOMATICALLY
     var healReport = runZeroConfigBootSequence();
-
     var action = (e && e.parameter && e.parameter.action) ? e.parameter.action : 'init';
-    var jsonOutput = {
-      success: true,
-      timestamp: new Date().toISOString(),
-      version: APP_CONFIG.VERSION,
-      dbVersion: APP_CONFIG.DB_VERSION,
-      action: action
-    };
+    var responseData = {};
 
     switch (action) {
       case 'init':
       case 'settings':
-        jsonOutput.data = getSheetDataAsJson(SHEETS.SETTINGS);
-        jsonOutput.appSettings = getSheetDataAsJson(SHEETS.APP_SETTINGS);
-        jsonOutput.healReport = healReport;
+        responseData = {
+          settings: getSheetDataAsJson(SHEETS.SETTINGS),
+          appSettings: getSheetDataAsJson(SHEETS.APP_SETTINGS),
+          healReport: healReport
+        };
         break;
 
       case 'products':
-        jsonOutput.data = getSheetDataAsJson(SHEETS.PRODUCTS);
+        responseData = getSheetDataAsJson(SHEETS.PRODUCTS);
         break;
 
       case 'categories':
-        jsonOutput.data = getSheetDataAsJson(SHEETS.CATEGORIES);
+        responseData = getSheetDataAsJson(SHEETS.CATEGORIES);
         break;
 
       case 'brands':
-        jsonOutput.data = getSheetDataAsJson(SHEETS.BRANDS);
+        responseData = getSheetDataAsJson(SHEETS.BRANDS);
         break;
 
       case 'collections':
-        jsonOutput.data = getSheetDataAsJson(SHEETS.COLLECTIONS);
+        responseData = getSheetDataAsJson(SHEETS.COLLECTIONS);
         break;
 
       case 'orders':
-        jsonOutput.data = getSheetDataAsJson(SHEETS.ORDERS);
+        responseData = getSheetDataAsJson(SHEETS.ORDERS);
         break;
 
       case 'banners':
-        jsonOutput.data = getSheetDataAsJson(SHEETS.BANNERS);
+        responseData = getSheetDataAsJson(SHEETS.BANNERS);
         break;
 
       case 'coupons':
-        jsonOutput.data = getSheetDataAsJson(SHEETS.COUPONS);
+        responseData = getSheetDataAsJson(SHEETS.COUPONS);
         break;
 
       case 'health':
       case 'health_check':
-        jsonOutput.diagnostic = runFullHealthCheck();
-        break;
+        return createJsonResponse(runFullHealthCheck(), true, 'System Health Diagnostic Complete');
 
       case 'setup_sheets':
-        jsonOutput.message = 'Zero-Config Auto-Installer executed successfully for all 30 sheets.';
-        jsonOutput.report = healReport;
-        break;
+        return createJsonResponse({ report: healReport }, true, 'Zero-Config Auto-Installer Executed');
 
       default:
-        jsonOutput.message = 'ROYMEN Enterprise GAS Zero-Config REST API v2.0 Online';
-        jsonOutput.healReport = healReport;
+        return createJsonResponse({ status: 'ONLINE', healReport: healReport }, true, 'ROYMEN REST API v2.0 Online');
     }
 
-    return ContentService
-      .createTextOutput(JSON.stringify(jsonOutput))
-      .setMimeType(ContentService.MimeType.JSON);
+    return createJsonResponse(responseData, true, 'Data fetched successfully.');
 
-  } catch (error) {
-    return ContentService
-      .createTextOutput(JSON.stringify({ success: false, error: error.toString() }))
-      .setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    return createErrorResponse(err.toString());
   } finally {
     lock.releaseLock();
   }
 }
 
-// ==========================================
-// REST API ROUTER - POST
-// ==========================================
 function doPost(e) {
   var lock = LockService.getScriptLock();
   lock.tryLock(15000);
@@ -211,76 +332,69 @@ function doPost(e) {
 
     var action = postData.action || 'ping';
     var payload = postData.payload || postData;
-    var result = {
-      success: true,
-      action: action,
-      timestamp: new Date().toISOString(),
-      version: APP_CONFIG.VERSION
-    };
 
     switch (action) {
       case 'checkEmailType':
-        result.emailType = checkUserOrAdminEmail(payload.email);
-        break;
+        return createJsonResponse(checkUserOrAdminEmail(payload.email), true, 'Email classification complete.');
 
       case 'verifyAdminPassword':
-        result.auth = verifyAdminPasswordInSheet(payload.email, payload.password);
-        break;
+        var pwRes = verifyAdminPasswordInSheet(payload.email, payload.password);
+        return createJsonResponse(pwRes, pwRes.success, pwRes.message);
 
       case 'verifyAdminSecretCode':
-        result.auth = verifyAdminSecretCodeInSheet(payload.email, payload.secretCode, payload.rememberMe);
-        break;
+        var secRes = verifyAdminSecretCodeInSheet(payload.email, payload.secretCode, payload.rememberMe);
+        return createJsonResponse(secRes, secRes.success, secRes.message);
 
       case 'sendOTP':
-        result.otpRes = generateAndSendOTP(payload.email);
-        break;
+        var otpRes = generateAndSendOTP(payload.email);
+        return createJsonResponse(otpRes, otpRes.success, otpRes.message);
 
       case 'placeOrder':
       case 'POST_ORDER':
-        result.orderId = saveOrderToSheet(payload);
+        var orderId = saveOrderToSheet(payload);
         sendOrderConfirmationEmail(payload);
-        logAuditTrail('CUSTOMER', 'PLACE_ORDER', SHEETS.ORDERS, 'Order placed successfully: ' + result.orderId);
-        break;
+        logAuditTrail('CUSTOMER', 'PLACE_ORDER', SHEETS.ORDERS, 'Order created: ' + orderId);
+        return createJsonResponse({ orderId: orderId }, true, 'Order placed successfully.');
 
       case 'updateProduct':
-        result.data = saveOrUpdateProduct(payload);
-        logAuditTrail('ADMIN', 'UPDATE_PRODUCT', SHEETS.PRODUCTS, 'Product updated: ' + payload.name);
-        break;
+        var prdId = saveOrUpdateProduct(payload);
+        logAuditTrail('ADMIN', 'UPDATE_PRODUCT', SHEETS.PRODUCTS, 'Product saved: ' + payload.name);
+        return createJsonResponse({ productId: prdId }, true, 'Product saved successfully.');
 
       case 'subscribeNewsletter':
-        result.message = saveSubscriber(payload.email);
-        break;
+        var subRes = saveSubscriber(payload.email);
+        return createJsonResponse({ subscriber: subRes }, true, 'Subscribed successfully.');
 
       case 'submitContact':
-        result.message = saveContactMessage(payload);
-        break;
+        var cntRes = saveContactMessage(payload);
+        return createJsonResponse({ contact: cntRes }, true, 'Contact message saved.');
 
       case 'ping':
       default:
-        result.message = 'ROYMEN REST WebApp Ping Acknowledged.';
+        return createJsonResponse({ message: 'ROYMEN REST WebApp Ping Acknowledged.' }, true, 'Ping successful.');
     }
 
-    return ContentService
-      .createTextOutput(JSON.stringify(result))
-      .setMimeType(ContentService.MimeType.JSON);
-
-  } catch (error) {
-    return ContentService
-      .createTextOutput(JSON.stringify({ success: false, error: error.toString() }))
-      .setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    return createErrorResponse(err.toString());
   } finally {
     lock.releaseLock();
   }
 }
+`
+  },
 
-// ==========================================
-// ZERO-CONFIGURATION BOOT, AUTO-INSTALLER & SELF-HEALING ENGINE
-// ==========================================
+  'Installer.gs': {
+    filename: 'Installer.gs',
+    category: 'Core',
+    description: 'Auto-installer & Boot sequence ensuring 30 tabs & headers exist.',
+    code: `/**
+ * Installer.gs - Zero-Config Auto Installer & Sheet Provisioner
+ */
+
 function runZeroConfigBootSequence() {
   var ss = getActiveSpreadsheet();
   var logs = [];
 
-  // 1. Ensure all 30 sheets exist with proper headers and formatting
   for (var tabName in SCHEMAS) {
     var sheet = ss.getSheetByName(tabName);
     var expectedHeaders = SCHEMAS[tabName];
@@ -293,9 +407,8 @@ function runZeroConfigBootSequence() {
         .setBackground('#18181b')
         .setFontColor('#ffffff');
       sheet.setFrozenRows(1);
-      logs.push("Auto-Installer: Created missing tab " + tabName);
+      logs.push("Auto-Installer: Created tab " + tabName);
     } else {
-      // Self-Healing: Check if any expected columns are missing in header row
       var data = sheet.getDataRange().getValues();
       var existingHeaders = (data.length > 0) ? data[0] : [];
 
@@ -306,23 +419,27 @@ function runZeroConfigBootSequence() {
           .setBackground('#18181b')
           .setFontColor('#ffffff');
         sheet.setFrozenRows(1);
-        logs.push("Self-Healing: Restored header row for " + tabName);
+        logs.push("Self-Healing: Restored headers for " + tabName);
       } else {
-        // Find missing columns and append them at end
         for (var h = 0; h < expectedHeaders.length; h++) {
           var expectedCol = expectedHeaders[h];
           if (existingHeaders.indexOf(expectedCol) === -1) {
-            var newColIndex = existingHeaders.length + 1;
-            sheet.getRange(1, newColIndex).setValue(expectedCol).setFontWeight('bold').setBackground('#18181b').setFontColor('#ffffff');
+            var newColIdx = existingHeaders.length + 1;
+            sheet.getRange(1, newColIdx).setValue(expectedCol).setFontWeight('bold').setBackground('#18181b').setFontColor('#ffffff');
             existingHeaders.push(expectedCol);
-            logs.push("Self-Healing: Added missing column '" + expectedCol + "' in " + tabName);
+            logs.push("Self-Healing: Added column '" + expectedCol + "' in " + tabName);
           }
         }
       }
     }
   }
 
-  // 2. Populate Default Settings in 01_Settings if missing
+  seedInitialSettingsIfMissing(ss, logs);
+  seedSuperAdminIfMissing(ss, logs);
+  return logs;
+}
+
+function seedInitialSettingsIfMissing(ss, logs) {
   var settingsSheet = ss.getSheetByName(SHEETS.SETTINGS);
   var settingsData = settingsSheet.getDataRange().getValues();
   var settingsMap = {};
@@ -332,34 +449,32 @@ function runZeroConfigBootSequence() {
     }
   }
 
-  var defaultSettings = {
+  var defaults = {
     'storeName': APP_CONFIG.APP_NAME,
     'tagline': APP_CONFIG.TAGLINE,
     'currency': APP_CONFIG.CURRENCY,
     'country': APP_CONFIG.COUNTRY,
-    'division': 'Dhaka',
     'insideDhakaFee': '80',
     'outsideDhakaFee': '150',
-    'paymentMethods': 'COD,bKash,Nagad,SSLCommerz',
     'appVersion': APP_CONFIG.VERSION,
     'dbVersion': APP_CONFIG.DB_VERSION,
     'lastBootTime': new Date().toISOString()
   };
 
   var now = new Date().toISOString();
-  for (var key in defaultSettings) {
+  for (var key in defaults) {
     if (!settingsMap[key]) {
-      settingsSheet.appendRow([key, defaultSettings[key], now]);
-      logs.push("Auto-Installer: Seeded default setting " + key);
+      settingsSheet.appendRow([key, defaults[key], now]);
+      logs.push("Installer: Seeded default setting " + key);
     }
   }
+}
 
-  // 3. Super Admin Self-Creation: Ensure at least one Super Admin exists in 02_Admins
+function seedSuperAdminIfMissing(ss, logs) {
   var adminSheet = ss.getSheetByName(SHEETS.ADMINS);
   var adminData = adminSheet.getDataRange().getValues();
-  var hasAdmin = (adminData.length > 1);
-
-  if (!hasAdmin) {
+  if (adminData.length <= 1) {
+    var now = new Date().toISOString();
     adminSheet.appendRow([
       'ADM001',
       'ROYMEN Executive Admin',
@@ -375,77 +490,98 @@ function runZeroConfigBootSequence() {
       now,
       now
     ]);
-    logs.push("Auto-Installer: Created Super Admin account " + APP_CONFIG.DEFAULT_ADMIN_EMAIL);
-    logAuditTrail('SYSTEM_BOOT', 'AUTO_CREATE_SUPER_ADMIN', SHEETS.ADMINS, 'Zero-config auto-installer created default Super Admin.');
+    logs.push("Installer: Seeded Super Admin account " + APP_CONFIG.DEFAULT_ADMIN_EMAIL);
   }
-
-  // 4. Auto Migration Engine: Update DB Version
-  if (settingsMap['dbVersion'] !== APP_CONFIG.DB_VERSION) {
-    updateSettingValue('dbVersion', APP_CONFIG.DB_VERSION);
-    logs.push("Auto-Migration: Database version synced to " + APP_CONFIG.DB_VERSION);
-  }
-
-  return logs;
 }
+`
+  },
 
-function updateSettingValue(key, val) {
+  'Migration.gs': {
+    filename: 'Migration.gs',
+    category: 'Core',
+    description: 'Auto-Migration engine comparing schema versions and non-destructively upgrading.',
+    code: `/**
+ * Migration.gs - Database Schema Versioning & Auto Migration Engine
+ */
+
+function runAutoMigrations() {
   var ss = getActiveSpreadsheet();
-  var sheet = ss.getSheetByName(SHEETS.SETTINGS);
+  var settingsSheet = ss.getSheetByName(SHEETS.SETTINGS);
+  var currentVersion = getSettingValue('dbVersion') || '1.0.0';
+  var targetVersion = APP_CONFIG.DB_VERSION;
+
+  if (currentVersion !== targetVersion) {
+    updateSettingValue('dbVersion', targetVersion);
+    logAuditTrail('SYSTEM_MIGRATION', 'VERSION_UPGRADE', SHEETS.SETTINGS, 'Migrated DB from ' + currentVersion + ' to ' + targetVersion);
+    return 'Database migrated from v' + currentVersion + ' to v' + targetVersion;
+  }
+
+  return 'Database schema is up to date (v' + currentVersion + ').';
+}
+`
+  },
+
+  'Database.gs': {
+    filename: 'Database.gs',
+    category: 'Core',
+    description: 'Generic CRUD operations for reading, inserting, updating, and deleting sheet rows.',
+    code: `/**
+ * Database.gs - Generic Sheet Row Operations
+ */
+
+function findRowInSheet(sheetName, columnName, targetValue) {
+  var ss = getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(sheetName);
+  if (!sheet) return null;
+
   var data = sheet.getDataRange().getValues();
+  if (data.length < 2) return null;
+
+  var headers = data[0];
+  var colIdx = headers.indexOf(columnName);
+  if (colIdx === -1) return null;
+
   for (var i = 1; i < data.length; i++) {
-    if (data[i][0] === key) {
-      sheet.getRange(i + 1, 2).setValue(val);
-      sheet.getRange(i + 1, 3).setValue(new Date().toISOString());
-      return;
+    if (data[i][colIdx] && data[i][colIdx].toString().toLowerCase() === targetValue.toString().toLowerCase()) {
+      var obj = { _rowIndex: i + 1 };
+      headers.forEach(function(h, idx) {
+        obj[h] = data[i][idx];
+      });
+      return obj;
     }
   }
-  sheet.appendRow([key, val, new Date().toISOString()]);
+  return null;
 }
 
-// ==========================================
-// APPLICATION HEALTH CHECK DIAGNOSTICS
-// ==========================================
-function runFullHealthCheck() {
+function updateRowInSheet(sheetName, rowIndex, columnMap) {
   var ss = getActiveSpreadsheet();
-  var report = {
-    status: 'HEALTHY',
-    spreadsheetId: ss.getId(),
-    spreadsheetName: ss.getName(),
-    sheetsFound: 0,
-    expectedSheetsCount: 30,
-    superAdminCreated: false,
-    cacheService: 'OPERATIONAL',
-    lockService: 'OPERATIONAL',
-    appVersion: APP_CONFIG.VERSION,
-    dbVersion: APP_CONFIG.DB_VERSION,
-    issues: []
-  };
+  var sheet = ss.getSheetByName(sheetName);
+  if (!sheet || rowIndex < 2) return false;
 
-  var sheets = ss.getSheets();
-  report.sheetsFound = sheets.length;
-
-  var adminSheet = ss.getSheetByName(SHEETS.ADMINS);
-  if (adminSheet && adminSheet.getLastRow() > 1) {
-    report.superAdminCreated = true;
-  } else {
-    report.issues.push("Super Admin record missing in 02_Admins.");
+  var headers = sheet.getDataRange().getValues()[0];
+  for (var key in columnMap) {
+    var cIdx = headers.indexOf(key);
+    if (cIdx !== -1) {
+      sheet.getRange(rowIndex, cIdx + 1).setValue(columnMap[key]);
+    }
   }
-
-  if (report.issues.length > 0) {
-    report.status = 'DEGRADED_AUTO_REPAIRED';
-  }
-
-  return report;
+  return true;
 }
+`
+  },
 
-// ==========================================
-// AUTHENTICATION CONTROLLERS (EMAIL / OTP / ADMIN PASSWORD / SECRET CODE)
-// ==========================================
+  'Admin.gs': {
+    filename: 'Admin.gs',
+    category: 'Auth & Security',
+    description: 'Executive Admin authentication, password hashing, lockout logic, and secret code check.',
+    code: `/**
+ * Admin.gs - Admin Authentication & Password/Secret Code Verification
+ */
+
 function checkUserOrAdminEmail(email) {
   if (!email) return { type: 'new_customer' };
   var normEmail = email.trim().toLowerCase();
 
-  // 1. Check Users sheet
   var users = getSheetDataAsJson(SHEETS.USERS);
   for (var u = 0; u < users.length; u++) {
     if (users[u].Email && users[u].Email.toLowerCase() === normEmail) {
@@ -453,7 +589,6 @@ function checkUserOrAdminEmail(email) {
     }
   }
 
-  // 2. Check Admins sheet
   var admins = getSheetDataAsJson(SHEETS.ADMINS);
   for (var a = 0; a < admins.length; a++) {
     if (admins[a].Email && admins[a].Email.toLowerCase() === normEmail) {
@@ -491,15 +626,15 @@ function verifyAdminPasswordInSheet(email, passwordInput) {
           var lockTime = new Date(Date.now() + 15 * 60 * 1000).toISOString();
           sheet.getRange(i + 1, 9).setValue(lockTime);
           sheet.getRange(i + 1, 7).setValue('locked');
-          logAuditTrail(email, 'ADMIN_LOCKOUT', SHEETS.ADMINS, 'Account locked after 5 failed password attempts.');
-          return { success: false, isLocked: true, message: 'Account locked for 15 minutes due to 5 failed login attempts.' };
+          logAuditTrail(email, 'ADMIN_LOCKOUT', SHEETS.ADMINS, 'Account locked for 15 minutes after 5 failed attempts.');
+          return { success: false, isLocked: true, message: 'Account locked for 15 minutes.' };
         }
         return { success: false, attemptsRemaining: 5 - failedAttempts, message: 'Invalid password. Attempt ' + failedAttempts + ' of 5.' };
       }
     }
   }
 
-  return { success: false, message: 'Administrator record not found.' };
+  return { success: false, message: 'Admin record not found.' };
 }
 
 function verifyAdminSecretCodeInSheet(email, secretInput, rememberMe) {
@@ -513,7 +648,6 @@ function verifyAdminSecretCodeInSheet(email, secretInput, rememberMe) {
     if (row[2] && row[2].toString().toLowerCase() === normEmail) {
       var secretCode = row[4] ? row[4].toString() : '';
       if (secretCode === secretInput.trim()) {
-        // Clear failed attempts and update last login
         sheet.getRange(i + 1, 8).setValue(0);
         sheet.getRange(i + 1, 9).setValue('');
         sheet.getRange(i + 1, 10).setValue(new Date().toISOString());
@@ -527,13 +661,7 @@ function verifyAdminSecretCodeInSheet(email, secretInput, rememberMe) {
         return {
           success: true,
           token: token,
-          user: {
-            id: row[0],
-            name: row[1],
-            email: row[2],
-            role: 'admin',
-            status: 'active'
-          }
+          user: { id: row[0], name: row[1], email: row[2], role: 'admin', status: 'active' }
         };
       } else {
         return { success: false, message: 'Invalid Secret Authorization Code.' };
@@ -543,39 +671,255 @@ function verifyAdminSecretCodeInSheet(email, secretInput, rememberMe) {
 
   return { success: false, message: 'Admin account record not found.' };
 }
+`
+  },
+
+  'Authentication.gs': {
+    filename: 'Authentication.gs',
+    category: 'Auth & Security',
+    description: 'OTP generation, email dispatch, user session creation, and verification.',
+    code: `/**
+ * Authentication.gs - Email OTP Dispatcher & Customer Session Manager
+ */
 
 function generateAndSendOTP(email) {
   var otp = Math.floor(100000 + Math.random() * 900000).toString();
   try {
-    MailApp.sendEmail(email, 'Your ROYMEN Security Verification Code', 'Your verification code is: ' + otp);
+    MailApp.sendEmail(email, 'Your ROYMEN Security Verification Code', 'Your ROYMEN security verification code is: ' + otp);
   } catch (err) {
-    Logger.log('OTP Mail error: ' + err.toString());
+    Logger.log('OTP Mail Error: ' + err.toString());
   }
-  return { success: true, otp: otp, message: 'OTP dispatched.' };
+  return { success: true, otp: otp, message: 'OTP security code dispatched.' };
 }
+`
+  },
 
-// ==========================================
-// HELPER UTILITIES & DATABASE CONTROLLERS
-// ==========================================
-function getSheetDataAsJson(sheetName) {
+  'Customer.gs': {
+    filename: 'Customer.gs',
+    category: 'Auth & Security',
+    description: 'Customer record management, profile updating, and saved addresses.',
+    code: `/**
+ * Customer.gs - Customer Record & Address Book Management
+ */
+
+function saveOrUpdateCustomer(cust) {
   var ss = getActiveSpreadsheet();
-  var sheet = ss.getSheetByName(sheetName);
-  if (!sheet) return [];
+  var sheet = ss.getSheetByName(SHEETS.USERS);
+  var custId = cust.id || generateUniqueId('USR');
 
-  var data = sheet.getDataRange().getValues();
-  if (data.length < 2) return [];
+  sheet.appendRow([
+    custId,
+    cust.name || '',
+    cust.email || '',
+    cust.phone || '',
+    'customer',
+    'active',
+    JSON.stringify(cust.addresses || []),
+    new Date().toISOString()
+  ]);
 
-  var headers = data[0];
-  var rows = data.slice(1);
-
-  return rows.map(function(row) {
-    var obj = {};
-    headers.forEach(function(header, index) {
-      obj[header] = row[index];
-    });
-    return obj;
-  });
+  return custId;
 }
+`
+  },
+
+  'Security.gs': {
+    filename: 'Security.gs',
+    category: 'Auth & Security',
+    description: 'Rate limiting with CacheService, LockService wrappers, and request sanitization.',
+    code: `/**
+ * Security.gs - Rate Limiting & Concurrency Locks
+ */
+
+function acquireScriptLock(timeoutMs) {
+  var lock = LockService.getScriptLock();
+  var success = lock.tryLock(timeoutMs || 10000);
+  return { lock: lock, acquired: success };
+}
+`
+  },
+
+  'Cache.gs': {
+    filename: 'Cache.gs',
+    category: 'Auth & Security',
+    description: 'Google Apps Script CacheService helper functions.',
+    code: `/**
+ * Cache.gs - CacheService Wrapper for Ultra-Fast API Responses
+ */
+
+function getCachedData(key) {
+  var cache = CacheService.getScriptCache();
+  var cached = cache.get(key);
+  if (cached) {
+    try {
+      return JSON.parse(cached);
+    } catch (e) {
+      return cached;
+    }
+  }
+  return null;
+}
+
+function setCachedData(key, value, expirationInSeconds) {
+  var cache = CacheService.getScriptCache();
+  var str = (typeof value === 'object') ? JSON.stringify(value) : value.toString();
+  cache.put(key, str, expirationInSeconds || 300);
+}
+`
+  },
+
+  'Products.gs': {
+    filename: 'Products.gs',
+    category: 'Catalog & Sales',
+    description: 'Product catalog manager, CRUD operations, image galleries, and pricing.',
+    code: `/**
+ * Products.gs - Product Catalog & SKU Management
+ */
+
+function saveOrUpdateProduct(prd) {
+  var ss = getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEETS.PRODUCTS);
+  var prdId = prd.id || generateUniqueId('PRD');
+
+  sheet.appendRow([
+    prdId,
+    prd.name,
+    prd.slug || slugifyText(prd.name),
+    prd.sku || ('SKU-' + Date.now()),
+    prd.barcode || '',
+    prd.category || 'Apparel',
+    prd.brand || 'ROYMEN',
+    prd.collection || 'Atelier',
+    prd.price || 0,
+    prd.discountPrice || 0,
+    prd.stock || 10,
+    prd.lowStockAlert || 2,
+    JSON.stringify(prd.colors || []),
+    JSON.stringify(prd.sizes || []),
+    JSON.stringify(prd.images || []),
+    prd.featured ? 'true' : 'false',
+    prd.status || 'active',
+    new Date().toISOString()
+  ]);
+
+  return prdId;
+}
+`
+  },
+
+  'Categories.gs': {
+    filename: 'Categories.gs',
+    category: 'Catalog & Sales',
+    description: 'Category taxonomy and collection hierarchy management.',
+    code: `/**
+ * Categories.gs - Category Taxonomy Controller
+ */
+
+function saveCategory(cat) {
+  var ss = getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEETS.CATEGORIES);
+  var catId = cat.id || generateUniqueId('CAT');
+
+  sheet.appendRow([
+    catId,
+    cat.name,
+    cat.slug || slugifyText(cat.name),
+    cat.image || '',
+    cat.itemCount || 0,
+    cat.description || ''
+  ]);
+  return catId;
+}
+`
+  },
+
+  'Brands.gs': {
+    filename: 'Brands.gs',
+    category: 'Catalog & Sales',
+    description: 'Brand profiles, logo URLs, and descriptions.',
+    code: `/**
+ * Brands.gs - Brand Profile Management
+ */
+
+function saveBrand(brand) {
+  var ss = getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEETS.BRANDS);
+  var brandId = brand.id || generateUniqueId('BRD');
+
+  sheet.appendRow([
+    brandId,
+    brand.name,
+    brand.slug || slugifyText(brand.name),
+    brand.logo || '',
+    brand.description || ''
+  ]);
+  return brandId;
+}
+`
+  },
+
+  'Collections.gs': {
+    filename: 'Collections.gs',
+    category: 'Catalog & Sales',
+    description: 'Featured seasonal collections and landing page banners.',
+    code: `/**
+ * Collections.gs - Seasonal Collection Manager
+ */
+
+function saveCollection(col) {
+  var ss = getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEETS.COLLECTIONS);
+  var colId = col.id || generateUniqueId('COL');
+
+  sheet.appendRow([
+    colId,
+    col.name,
+    col.slug || slugifyText(col.name),
+    col.bannerImage || '',
+    col.description || '',
+    col.itemCount || 0,
+    col.isFeatured ? 'true' : 'false'
+  ]);
+  return colId;
+}
+`
+  },
+
+  'Variants.gs': {
+    filename: 'Variants.gs',
+    category: 'Catalog & Sales',
+    description: 'Product variant size/color stock and price override manager.',
+    code: `/**
+ * Variants.gs - Product Variant SKU & Stock Matrix
+ */
+
+function saveProductVariant(varItem) {
+  var ss = getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEETS.PRODUCT_VARIANTS);
+  var varId = varItem.id || generateUniqueId('VAR');
+
+  sheet.appendRow([
+    varId,
+    varItem.productId,
+    varItem.sku || generateUniqueId('SKU'),
+    varItem.color || '',
+    varItem.size || '',
+    varItem.stock || 0,
+    varItem.price || 0,
+    varItem.status || 'active'
+  ]);
+  return varId;
+}
+`
+  },
+
+  'Orders.gs': {
+    filename: 'Orders.gs',
+    category: 'Catalog & Sales',
+    description: 'Order processing, checkout tracking, and courier integration logger.',
+    code: `/**
+ * Orders.gs - Order Processing & Checkout Controller
+ */
 
 function saveOrderToSheet(order) {
   var ss = getActiveSpreadsheet();
@@ -610,82 +954,198 @@ function saveOrderToSheet(order) {
 
   return orderId;
 }
+`
+  },
 
-function saveOrUpdateProduct(prd) {
+  'Cart.gs': {
+    filename: 'Cart.gs',
+    category: 'Catalog & Sales',
+    description: 'Cart persistence and multi-device sync in 17_Cart.',
+    code: `/**
+ * Cart.gs - Customer Shopping Cart Synchronization
+ */
+
+function saveCartItem(item) {
   var ss = getActiveSpreadsheet();
-  var sheet = ss.getSheetByName(SHEETS.PRODUCTS);
-  var prdId = prd.id || ('PRD-' + Math.floor(100000 + Math.random() * 900000));
+  var sheet = ss.getSheetByName(SHEETS.CART);
+  var cartId = item.id || generateUniqueId('CRT');
 
   sheet.appendRow([
-    prdId,
-    prd.name,
-    prd.slug || prd.name.toLowerCase().replace(/\\s+/g, '-'),
-    prd.sku || 'SKU-' + Date.now(),
-    prd.barcode || '',
-    prd.category || 'Apparel',
-    prd.brand || 'ROYMEN',
-    prd.collection || 'Atelier',
-    prd.price || 0,
-    prd.discountPrice || 0,
-    prd.stock || 10,
-    prd.lowStockAlert || 2,
-    JSON.stringify(prd.colors || []),
-    JSON.stringify(prd.sizes || []),
-    JSON.stringify(prd.images || []),
-    prd.featured ? 'true' : 'false',
-    prd.status || 'active',
+    cartId,
+    item.userId || 'GUEST',
+    item.productId,
+    item.color || '',
+    item.size || '',
+    item.quantity || 1
+  ]);
+  return cartId;
+}
+`
+  },
+
+  'Wishlist.gs': {
+    filename: 'Wishlist.gs',
+    category: 'Catalog & Sales',
+    description: 'Wishlist item persistence and user bookmarking.',
+    code: `/**
+ * Wishlist.gs - Customer Wishlist Controller
+ */
+
+function saveWishlistItem(userId, productId) {
+  var ss = getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEETS.WISHLIST);
+  var wishId = generateUniqueId('WSH');
+
+  sheet.appendRow([
+    wishId,
+    userId,
+    productId,
     new Date().toISOString()
   ]);
-
-  return prdId;
+  return wishId;
 }
+`
+  },
 
-function saveSubscriber(email) {
+  'Coupons.gs': {
+    filename: 'Coupons.gs',
+    category: 'Catalog & Sales',
+    description: 'Promo code validation, discount calculations, and limit tracking.',
+    code: `/**
+ * Coupons.gs - Coupon Code & Discount Matrix
+ */
+
+function validateCouponCode(code, spendAmount) {
+  var coupons = getSheetDataAsJson(SHEETS.COUPONS);
+  var normCode = code.trim().toUpperCase();
+
+  for (var c = 0; c < coupons.length; c++) {
+    var cpn = coupons[c];
+    if (cpn.Code && cpn.Code.toUpperCase() === normCode && cpn.Status === 'active') {
+      var minSpend = parseFloat(cpn.MinSpend || 0);
+      if (spendAmount < minSpend) {
+        return { valid: false, message: 'Minimum spend of BDT ' + minSpend + ' required.' };
+      }
+      return { valid: true, coupon: cpn };
+    }
+  }
+  return { valid: false, message: 'Invalid or expired coupon code.' };
+}
+`
+  },
+
+  'Reviews.gs': {
+    filename: 'Reviews.gs',
+    category: 'Catalog & Sales',
+    description: 'Customer star ratings, product feedback, and buyer verification.',
+    code: `/**
+ * Reviews.gs - Product Reviews & Rating System
+ */
+
+function saveReview(rev) {
   var ss = getActiveSpreadsheet();
-  var sheet = ss.getSheetByName(SHEETS.NEWSLETTER);
-  if (!sheet) return 'Newsletter sheet missing.';
+  var sheet = ss.getSheetByName(SHEETS.REVIEWS);
+  var revId = generateUniqueId('REV');
 
   sheet.appendRow([
-    'nl-' + Date.now(),
-    email,
+    revId,
+    rev.productId,
+    rev.customerName || 'Anonymous',
+    rev.rating || 5,
+    rev.comment || '',
+    rev.verifiedBuyer ? 'true' : 'false',
     new Date().toISOString(),
-    'active'
+    'approved'
   ]);
-  return 'Subscribed successfully.';
+  return revId;
 }
+`
+  },
 
-function saveContactMessage(cnt) {
+  'Inventory.gs': {
+    filename: 'Inventory.gs',
+    category: 'Catalog & Sales',
+    description: 'Inventory audit logs, stock deduction, and reorder alerts.',
+    code: `/**
+ * Inventory.gs - Inventory Audit Trail & Stock Deduction Engine
+ */
+
+function logInventoryChange(productId, sku, changeType, quantity, reason) {
   var ss = getActiveSpreadsheet();
-  var sheet = ss.getSheetByName(SHEETS.CONTACTS);
-  if (!sheet) return 'Contacts sheet missing.';
+  var sheet = ss.getSheetByName(SHEETS.INVENTORY_LOG);
+  var logId = generateUniqueId('INV');
 
   sheet.appendRow([
-    'cnt-' + Date.now(),
-    cnt.name,
-    cnt.email,
-    cnt.phone || '',
-    cnt.subject || '',
-    cnt.message || '',
-    'unread',
+    logId,
+    productId,
+    sku,
+    changeType,
+    quantity,
+    reason || 'Manual Adjustment',
     new Date().toISOString()
   ]);
-  return 'Message received.';
+  return logId;
 }
+`
+  },
 
-function logAuditTrail(user, action, moduleName, details) {
+  'Analytics.gs': {
+    filename: 'Analytics.gs',
+    category: 'System & Utilities',
+    description: 'Traffic analytics logger, visitor tracking, and sales metrics.',
+    code: `/**
+ * Analytics.gs - Sales Analytics & Visitor Tracking
+ */
+
+function logVisitorAccess(ip, device, path) {
   var ss = getActiveSpreadsheet();
-  var sheet = ss.getSheetByName(SHEETS.AUDIT_LOG);
+  var sheet = ss.getSheetByName(SHEETS.VISITORS);
   if (sheet) {
     sheet.appendRow([
-      'audit-' + Date.now(),
-      user,
-      action,
-      moduleName,
-      new Date().toISOString(),
-      details
+      generateUniqueId('VIS'),
+      ip || '127.0.0.1',
+      device || 'Web',
+      path || '/',
+      new Date().toISOString()
     ]);
   }
 }
+`
+  },
+
+  'Notifications.gs': {
+    filename: 'Notifications.gs',
+    category: 'System & Utilities',
+    description: 'In-app notification system and administrator alerts.',
+    code: `/**
+ * Notifications.gs - Real-Time Admin & Customer Alerts
+ */
+
+function createNotification(type, title, message) {
+  var ss = getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEETS.NOTIFICATIONS);
+  var notifId = generateUniqueId('NTF');
+
+  sheet.appendRow([
+    notifId,
+    type || 'INFO',
+    title,
+    message,
+    'false',
+    new Date().toISOString()
+  ]);
+  return notifId;
+}
+`
+  },
+
+  'Email.gs': {
+    filename: 'Email.gs',
+    category: 'System & Utilities',
+    description: 'HTML email template compilation and concierge transactional mailer.',
+    code: `/**
+ * Email.gs - Transactional Email Engine & Template Renderer
+ */
 
 function sendOrderConfirmationEmail(order) {
   try {
@@ -707,5 +1167,257 @@ function sendOrderConfirmationEmail(order) {
     Logger.log('Email send error: ' + err.toString());
   }
 }
+`
+  },
+
+  'Logger.gs': {
+    filename: 'Logger.gs',
+    category: 'System & Utilities',
+    description: 'Audit log trail recorder for administrative action compliance.',
+    code: `/**
+ * Logger.gs - Audit Trail & System Event Logger
+ */
+
+function logAuditTrail(user, action, moduleName, details) {
+  var ss = getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEETS.AUDIT_LOG);
+  if (sheet) {
+    sheet.appendRow([
+      generateUniqueId('AUD'),
+      user,
+      action,
+      moduleName,
+      new Date().toISOString(),
+      details
+    ]);
+  }
+}
+`
+  },
+
+  'Health.gs': {
+    filename: 'Health.gs',
+    category: 'System & Utilities',
+    description: 'Full database health diagnostic & auto-repair scanner.',
+    code: `/**
+ * Health.gs - Full Diagnostic Scanner & Self-Healing Health Check
+ */
+
+function runFullHealthCheck() {
+  var ss = getActiveSpreadsheet();
+  var report = {
+    status: 'HEALTHY',
+    spreadsheetId: ss.getId(),
+    spreadsheetName: ss.getName(),
+    sheetsFound: 0,
+    expectedSheetsCount: 30,
+    superAdminCreated: false,
+    cacheService: 'OPERATIONAL',
+    lockService: 'OPERATIONAL',
+    appVersion: APP_CONFIG.VERSION,
+    dbVersion: APP_CONFIG.DB_VERSION,
+    issues: []
+  };
+
+  var sheets = ss.getSheets();
+  report.sheetsFound = sheets.length;
+
+  var adminSheet = ss.getSheetByName(SHEETS.ADMINS);
+  if (adminSheet && adminSheet.getLastRow() > 1) {
+    report.superAdminCreated = true;
+  } else {
+    report.issues.push("Super Admin record missing in 02_Admins.");
+  }
+
+  if (report.issues.length > 0) {
+    report.status = 'DEGRADED_AUTO_REPAIRED';
+  }
+
+  return report;
+}
+`
+  },
+
+  'Backup.gs': {
+    filename: 'Backup.gs',
+    category: 'System & Utilities',
+    description: 'Automated backup logging and snapshot tracking.',
+    code: `/**
+ * Backup.gs - Automated Backup Log & Data Snapshot Controller
+ */
+
+function recordBackupLog(sheetName, rowCount) {
+  var ss = getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEETS.BACKUP_LOG);
+  var backupId = generateUniqueId('BKP');
+
+  if (sheet) {
+    sheet.appendRow([
+      backupId,
+      sheetName,
+      rowCount,
+      new Date().toISOString(),
+      'COMPLETED'
+    ]);
+  }
+  return backupId;
+}
+`
+  },
+
+  'Settings.gs': {
+    filename: 'Settings.gs',
+    category: 'System & Utilities',
+    description: 'Key-value settings reader and writer for 01_Settings and 29_App_Settings.',
+    code: `/**
+ * Settings.gs - Key-Value Settings Controller
+ */
+
+function getSettingValue(key) {
+  var ss = getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEETS.SETTINGS);
+  if (!sheet) return null;
+
+  var data = sheet.getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+    if (data[i][0] === key) {
+      return data[i][1];
+    }
+  }
+  return null;
+}
+
+function updateSettingValue(key, val) {
+  var ss = getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEETS.SETTINGS);
+  if (!sheet) return;
+
+  var data = sheet.getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+    if (data[i][0] === key) {
+      sheet.getRange(i + 1, 2).setValue(val);
+      sheet.getRange(i + 1, 3).setValue(new Date().toISOString());
+      return;
+    }
+  }
+  sheet.appendRow([key, val, new Date().toISOString()]);
+}
+`
+  },
+
+  'Developer.gs': {
+    filename: 'Developer.gs',
+    category: 'System & Utilities',
+    description: 'Developer panel endpoints, system diagnostics, and schema inspector.',
+    code: `/**
+ * Developer.gs - Developer API Utilities & System Configuration Inspector
+ */
+
+function getSystemDeveloperConfig() {
+  return {
+    appVersion: APP_CONFIG.VERSION,
+    dbVersion: APP_CONFIG.DB_VERSION,
+    sheetsCount: 30,
+    supportedGateways: ['COD', 'bKash', 'Nagad', 'SSLCommerz'],
+    activeSpreadsheetName: getActiveSpreadsheet().getName()
+  };
+}
+`
+  }
+};
+
+// ==========================================
+// ENTERPRISE BUILD SYSTEM & QUALITY GATE
+// ==========================================
+let currentBuildCount = 104;
+
+export function buildEnterpriseBackend(): BuildResult {
+  currentBuildCount++;
+  const issues: string[] = [];
+  const functionNames = new Set<string>();
+  let totalLines = 0;
+
+  // 1. Analyze and validate every source module
+  const fileKeys = Object.keys(GAS_SOURCE_FILES);
+  for (const key of fileKeys) {
+    const module = GAS_SOURCE_FILES[key];
+    const lines = module.code.split('\n');
+    totalLines += lines.length;
+
+    // Quality Gate Check: Check for function name collisions across modules
+    const fnRegex = /function\s+([a-zA-Z0-9_$]+)\s*\(/g;
+    let match: RegExpExecArray | null;
+    while ((match = fnRegex.exec(module.code)) !== null) {
+      const fnName = match[1];
+      if (functionNames.has(fnName)) {
+        issues.push(`Duplicate function '${fnName}' detected in module '${key}'.`);
+      } else {
+        functionNames.add(fnName);
+      }
+    }
+  }
+
+  // 2. Compute build hash and timestamp
+  const buildHash = 'BUILD-' + Math.random().toString(36).substring(2, 10).toUpperCase();
+  const timestamp = new Date().toISOString();
+  const qualityGatePassed = issues.length === 0;
+
+  // 3. Assemble production Code.gs artifact preserving execution order and module headers
+  const header = `/**
+ * ==============================================================================
+ * ROYMEN ENTERPRISE E-COMMERCE PLATFORM - ZERO-CONFIGURATION GAS BACKEND
+ * BRAND: ROYMEN | TAGLINE: Wear Confidence. | COUNTRY: BANGLADESH
+ * SPREADSHEET TABS: 30 ENTERPRISE SHEETS
+ * VERSION: ${APP_CONFIG_META.VERSION} | BUILD: #${currentBuildCount} (${buildHash})
+ * GENERATED AT: ${timestamp}
+ * ==============================================================================
+ * 
+ * INSTALLATION INSTRUCTIONS:
+ * 1. Open Google Sheets > Extensions > Apps Script.
+ * 2. Delete any existing code and paste this ENTIRE generated Code.gs file.
+ * 3. Deploy as Web App (Execute as 'Me', Who has access 'Anyone').
+ * 4. Paste Web App URL in ROYMEN Admin Panel / config.ts.
+ */
+
 `;
+
+  let combinedCode = header;
+  for (const key of fileKeys) {
+    const mod = GAS_SOURCE_FILES[key];
+    combinedCode += `// ==========================================\n`;
+    combinedCode += `// MODULE: ${mod.filename} (${mod.category})\n`;
+    combinedCode += `// ${mod.description}\n`;
+    combinedCode += `// ==========================================\n`;
+    combinedCode += mod.code + `\n\n`;
+  }
+
+  const stats: BuildStats = {
+    status: qualityGatePassed ? 'SUCCESS' : 'QUALITY_GATE_FAILED',
+    version: APP_CONFIG_META.VERSION,
+    dbVersion: APP_CONFIG_META.DB_VERSION,
+    buildNumber: currentBuildCount,
+    buildHash: buildHash,
+    timestamp: timestamp,
+    modulesCount: fileKeys.length,
+    functionsCount: functionNames.size,
+    linesCount: combinedCode.split('\n').length,
+    qualityGatePassed: qualityGatePassed
+  };
+
+  return {
+    success: qualityGatePassed,
+    code: combinedCode,
+    stats: stats,
+    issues: issues
+  };
+}
+
+export const APP_CONFIG_META = {
+  VERSION: "2.0.0",
+  DB_VERSION: "2.0.0"
+};
+
+export function generateGoogleAppsScriptCode(): string {
+  const result = buildEnterpriseBackend();
+  return result.code;
 }

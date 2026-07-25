@@ -11,6 +11,7 @@ import {
   BarChart3,
   Settings as SettingsIcon,
   FileSpreadsheet,
+  Activity,
   ShieldCheck,
   LogOut,
   RefreshCcw,
@@ -159,7 +160,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
               activeTab === 'sheets-sync' ? 'bg-amber-500 text-black shadow-md' : 'text-zinc-400 hover:bg-zinc-900 hover:text-white'
             }`}
           >
-            <FileSpreadsheet className="w-4 h-4 text-emerald-400" /> GAS Code & Sheets Sync
+            <Activity className="w-4 h-4 text-emerald-400" /> Operations Center & GAS
           </button>
         </aside>
 
