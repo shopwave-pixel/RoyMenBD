@@ -1,0 +1,6 @@
+{
+  "name": "ROYMEN Enterprise Platform",
+  "description": "Enterprise B2C Fashion E-commerce & Management Platform for ROYMEN - Wear Confidence",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
