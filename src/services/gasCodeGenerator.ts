@@ -1535,6 +1535,14 @@ function sendAdminNewOrderAlertEmail(order) {
 
   return results;
 }
+
+function sendCustomerOrderConfirmation(order) {
+  return sendCustomerOrderConfirmationEmail(order);
+}
+
+function sendAdminNewOrderNotification(order) {
+  return sendAdminNewOrderAlertEmail(order);
+}
 `
   },
 
