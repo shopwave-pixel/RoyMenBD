@@ -77,6 +77,7 @@ var SHEETS = {
   ORDER_STATUS_LOG: '24_Order_Status_Log',
   SYSTEM_CONFIG: '25_System_Config',
   EMAIL_TEMPLATES: '26_Email_Templates',
+  EMAIL_LOG: 'Email_Log',
   PAYMENT_SETTINGS: '27_Payment_Settings',
   SHIPPING_SETTINGS: '28_Shipping_Settings',
   APP_SETTINGS: '29_App_Settings',
@@ -110,6 +111,7 @@ var SCHEMAS = {
   '24_Order_Status_Log': ['ID', 'OrderID', 'PreviousStatus', 'NewStatus', 'UpdatedBy', 'Timestamp'],
   '25_System_Config': ['ConfigKey', 'ConfigValue', 'Description', 'LastUpdated'],
   '26_Email_Templates': ['TemplateID', 'Subject', 'BodyHtml', 'Variables', 'Status'],
+  'Email_Log': ['Email ID', 'Recipient', 'Category', 'Subject', 'Status', 'Sent Time', 'Retry Count', 'Error Message'],
   '27_Payment_Settings': ['Gateway', 'Enabled', 'MerchantID', 'Mode', 'LastUpdated'],
   '28_Shipping_Settings': ['Zone', 'FeeInsideDhaka', 'FeeOutsideDhaka', 'FreeShippingMin', 'CourierPartner'],
   '29_App_Settings': ['AppName', 'Tagline', 'CurrencySymbol', 'Country', 'SupportEmail', 'SupportPhone'],
@@ -296,6 +298,11 @@ function doGet(e) {
         responseData = getSheetDataAsJson(SHEETS.COUPONS);
         break;
 
+      case 'email_logs':
+      case 'emailLogs':
+        responseData = getSheetDataAsJson('Email_Log') || getSheetDataAsJson(SHEETS.EMAIL_LOG);
+        break;
+
       case 'health':
       case 'health_check':
         return createJsonResponse(runFullHealthCheck(), true, 'System Health Diagnostic Complete');
@@ -346,15 +353,23 @@ function doPost(e) {
         return createJsonResponse(secRes, secRes.success, secRes.message);
 
       case 'sendOTP':
-        var otpRes = generateAndSendOTP(payload.email);
+        var otpRes = generateAndSendOTP(payload.email, payload.name);
         return createJsonResponse(otpRes, otpRes.success, otpRes.message);
 
       case 'placeOrder':
       case 'POST_ORDER':
         var orderId = saveOrderToSheet(payload);
-        sendOrderConfirmationEmail(payload);
+        payload.id = orderId;
+        // Automatically send Customer Order Confirmation Email
+        sendCustomerOrderConfirmationEmail(payload);
+        // Automatically send Admin New Order Notification Email
+        sendAdminNewOrderAlertEmail(payload);
         logAuditTrail('CUSTOMER', 'PLACE_ORDER', SHEETS.ORDERS, 'Order created: ' + orderId);
         return createJsonResponse({ orderId: orderId }, true, 'Order placed successfully.');
+
+      case 'processEmailQueue':
+        var qRes = processFailedEmailQueue();
+        return createJsonResponse({ result: qRes }, true, 'Email queue process completed.');
 
       case 'updateProduct':
         var prdId = saveOrUpdateProduct(payload);
@@ -682,14 +697,25 @@ function verifyAdminSecretCodeInSheet(email, secretInput, rememberMe) {
  * Authentication.gs - Email OTP Dispatcher & Customer Session Manager
  */
 
-function generateAndSendOTP(email) {
+function generateAndSendOTP(email, name) {
   var otp = Math.floor(100000 + Math.random() * 900000).toString();
+  var custName = name || 'Valued Customer';
+  
+  if (!name) {
+    try {
+      var userRow = findRowInSheet(SHEETS.USERS, 'Email', email);
+      if (userRow && userRow.Name) {
+        custName = userRow.Name;
+      }
+    } catch (e) {}
+  }
+
   try {
-    MailApp.sendEmail(email, 'Your ROYMEN Security Verification Code', 'Your ROYMEN security verification code is: ' + otp);
+    sendCustomerOTPEmail(email, otp, custName);
   } catch (err) {
     Logger.log('OTP Mail Error: ' + err.toString());
   }
-  return { success: true, otp: otp, message: 'OTP security code dispatched.' };
+  return { success: true, otp: otp, message: 'Login OTP verification code dispatched.' };
 }
 `
   },
@@ -1144,28 +1170,370 @@ function createNotification(type, title, message) {
     category: 'System & Utilities',
     description: 'HTML email template compilation and concierge transactional mailer.',
     code: `/**
- * Email.gs - Transactional Email Engine & Template Renderer
+ * Email.gs - Essential Enterprise Transactional Email Engine & Workflow
  */
 
-function sendOrderConfirmationEmail(order) {
-  try {
-    if (!order.customerEmail) return;
+function buildBaseHtmlEmail(title, bodyContentHtml) {
+  var supportEmail = getSettingValue('supportEmail') || 'support@roymen.com.bd';
+  var supportPhone = getSettingValue('supportPhone') || '+880 1700-000000';
+  var storeName = APP_CONFIG.APP_NAME || 'ROYMEN';
+  var tagline = APP_CONFIG.TAGLINE || 'Wear Confidence.';
 
-    var subject = 'Order Confirmed #' + (order.id || 'ROYMEN') + ' | ROYMEN - Wear Confidence';
-    var body = "Dear " + (order.customerName || 'Valued Customer') + ",\\n\\n" +
-      "Thank you for choosing ROYMEN - Wear Confidence.\\n\\n" +
-      "Order ID: " + order.id + "\\n" +
-      "Total Amount: BDT ৳" + order.total + "\\n" +
-      "Payment Method: " + order.paymentMethod + "\\n\\n" +
-      "Our concierge team is preparing your package for express dispatch.\\n\\n" +
-      "Warm Regards,\\n" +
-      "ROYMEN Atelier Bangladesh\\n" +
-      "Level 4, Gulshan Avenue, Dhaka";
+  var html = '<!DOCTYPE html>' +
+  '<html>' +
+  '<head>' +
+  '<meta charset="utf-8">' +
+  '<meta name="viewport" content="width=device-width, initial-scale=1.0">' +
+  '<style>' +
+  '  body { margin: 0; padding: 0; background-color: #09090b; color: #f4f4f5; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased; }' +
+  '  .container { max-width: 600px; margin: 30px auto; background-color: #18181b; border: 1px solid #27272a; border-radius: 16px; overflow: hidden; font-size: 15px; line-height: 1.6; }' +
+  '  .header { padding: 32px 32px 24px; text-align: center; background-color: #18181b; border-bottom: 1px solid #27272a; }' +
+  '  .logo { font-size: 28px; font-weight: 800; letter-spacing: 4px; color: #f59e0b; text-decoration: none; text-transform: uppercase; display: inline-block; }' +
+  '  .tagline { font-size: 11px; text-transform: uppercase; letter-spacing: 2px; color: #a1a1aa; margin-top: 6px; font-weight: 600; }' +
+  '  .content { padding: 32px; background-color: #18181b; }' +
+  '  .footer { padding: 24px 32px; text-align: center; background-color: #09090b; border-top: 1px solid #27272a; font-size: 12px; color: #a1a1aa; }' +
+  '  .footer a { color: #f59e0b; text-decoration: none; }' +
+  '  .badge { display: inline-block; padding: 4px 12px; background-color: #27272a; color: #f59e0b; border-radius: 20px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; }' +
+  '  .table { width: 100%; border-collapse: collapse; margin: 20px 0; }' +
+  '  .table th { text-align: left; padding: 10px; background-color: #27272a; color: #a1a1aa; font-size: 12px; text-transform: uppercase; }' +
+  '  .table td { padding: 12px 10px; border-bottom: 1px solid #27272a; color: #f4f4f5; }' +
+  '  .total-box { background-color: #27272a; padding: 16px; border-radius: 12px; margin-top: 20px; border: 1px solid #3f3f46; }' +
+  '  .btn { display: inline-block; padding: 14px 28px; background-color: #f59e0b; color: #09090b; font-weight: 700; text-decoration: none; border-radius: 8px; margin-top: 20px; font-size: 14px; text-transform: uppercase; letter-spacing: 1px; }' +
+  '  @media (max-width: 600px) { .container { margin: 0; border-radius: 0; } .content, .header, .footer { padding: 20px; } }' +
+  '</style>' +
+  '</head>' +
+  '<body>' +
+  '  <div class="container">' +
+  '    <div class="header">' +
+  '      <div class="logo">' + storeName + '</div>' +
+  '      <div class="tagline">' + tagline + ' • BANGLADESH</div>' +
+  '    </div>' +
+  '    <div class="content">' +
+  bodyContentHtml +
+  '    </div>' +
+  '    <div class="footer">' +
+  '      <p style="margin: 0 0 10px; font-weight: 600; color: #e4e4e7;">ROYMEN Atelier Bangladesh • Level 4, Gulshan Avenue, Dhaka</p>' +
+  '      <p style="margin: 0 0 10px;">Support Email: <a href="mailto:' + supportEmail + '">' + supportEmail + '</a> | Support Phone: ' + supportPhone + '</p>' +
+  '      <p style="margin: 0 0 14px;">Social: <a href="https://facebook.com/roymen.bd" target="_blank">Facebook</a> | <a href="https://instagram.com/roymen.bd" target="_blank">Instagram</a> | <a href="https://linkedin.com/company/roymen" target="_blank">LinkedIn</a></p>' +
+  '      <p style="margin: 0; color: #71717a;">© 2026 ROYMEN. All Rights Reserved. Dark Mode Friendly & Mobile Responsive.</p>' +
+  '    </div>' +
+  '  </div>' +
+  '</body>' +
+  '</html>';
 
-    MailApp.sendEmail(order.customerEmail, subject, body);
-  } catch (err) {
-    Logger.log('Email send error: ' + err.toString());
+  return html;
+}
+
+function queueAndSendEmail(recipient, category, subject, htmlBody) {
+  var ss = getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('Email_Log') || ss.getSheetByName(SHEETS.EMAIL_LOG);
+  
+  if (!sheet) {
+    runZeroConfigBootSequence();
+    sheet = ss.getSheetByName('Email_Log') || ss.getSheetByName(SHEETS.EMAIL_LOG);
   }
+
+  // Prevent Duplicate Emails (check if same recipient and subject logged in the last 60 seconds)
+  var normRecipient = (recipient || '').trim().toLowerCase();
+  var nowIso = new Date().toISOString();
+  
+  if (sheet) {
+    var logs = sheet.getDataRange().getValues();
+    if (logs.length > 1) {
+      var recentCutoff = Date.now() - 60000;
+      for (var i = logs.length - 1; i >= Math.max(1, logs.length - 20); i--) {
+        var rowRecip = (logs[i][1] || '').toString().toLowerCase();
+        var rowSubj = (logs[i][3] || '').toString();
+        var rowStatus = (logs[i][4] || '').toString();
+        var rowTime = logs[i][5] ? new Date(logs[i][5]).getTime() : 0;
+        
+        if (rowRecip === normRecipient && rowSubj === subject && rowStatus === 'SENT' && rowTime > recentCutoff) {
+          Logger.log('Duplicate email prevented for: ' + normRecipient + ' (' + subject + ')');
+          return { success: true, duplicatePrevented: true };
+        }
+      }
+    }
+  }
+
+  var emailId = 'EML-' + Date.now() + '-' + Math.floor(1000 + Math.random() * 9000);
+  var status = 'QUEUED';
+  var sentTime = '';
+  var retryCount = 0;
+  var errorMessage = '';
+
+  try {
+    // Attempt dispatch via GmailApp / MailApp
+    if (typeof GmailApp !== 'undefined' && GmailApp.sendEmail) {
+      GmailApp.sendEmail(recipient, subject, 'Please view this email in an HTML compatible mail client.', {
+        htmlBody: htmlBody,
+        name: 'ROYMEN Concierge'
+      });
+    } else {
+      MailApp.sendEmail(recipient, subject, 'Please view this email in an HTML compatible mail client.', {
+        htmlBody: htmlBody,
+        name: 'ROYMEN Concierge'
+      });
+    }
+
+    status = 'SENT';
+    sentTime = nowIso;
+  } catch (err) {
+    status = 'FAILED';
+    errorMessage = err.toString();
+    retryCount = 1;
+    Logger.log('Email Send Failure: ' + errorMessage);
+  }
+
+  // Record in Email_Log
+  if (sheet) {
+    sheet.appendRow([
+      emailId,
+      recipient,
+      category,
+      subject,
+      status,
+      sentTime,
+      retryCount,
+      errorMessage
+    ]);
+  }
+
+  return { success: status === 'SENT', emailId: emailId, status: status, error: errorMessage };
+}
+
+function processFailedEmailQueue() {
+  var ss = getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('Email_Log') || ss.getSheetByName(SHEETS.EMAIL_LOG);
+  if (!sheet) return 'No Email_Log sheet found.';
+
+  var data = sheet.getDataRange().getValues();
+  if (data.length < 2) return 'No queued emails found.';
+
+  var retriedCount = 0;
+  for (var i = 1; i < data.length; i++) {
+    var rowStatus = (data[i][4] || '').toString();
+    var retryCount = parseInt(data[i][6] || 0, 10);
+
+    if ((rowStatus === 'FAILED' || rowStatus === 'QUEUED') && retryCount < 3) {
+      var recipient = data[i][1];
+      var subject = data[i][3];
+      
+      try {
+        MailApp.sendEmail(recipient, subject, 'ROYMEN Notification Retry', { name: 'ROYMEN Concierge' });
+        sheet.getRange(i + 1, 5).setValue('SENT');
+        sheet.getRange(i + 1, 6).setValue(new Date().toISOString());
+        retriedCount++;
+      } catch (err) {
+        sheet.getRange(i + 1, 7).setValue(retryCount + 1);
+        sheet.getRange(i + 1, 8).setValue(err.toString());
+      }
+    }
+  }
+
+  return 'Processed queue. Retried ' + retriedCount + ' email(s).';
+}
+
+function sendCustomerOTPEmail(email, otp, name) {
+  var custName = name || 'Valued Customer';
+  var expiryDate = new Date(Date.now() + 10 * 60 * 1000);
+  var expiryStr = expiryDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Dhaka' });
+
+  var content = '<div style="text-align: center;">' +
+    '<span class="badge">Security Verification</span>' +
+    '<h2 style="font-size: 22px; margin: 16px 0 8px; color: #ffffff;">Login Verification Code</h2>' +
+    '<p style="color: #a1a1aa; margin-bottom: 24px;">Dear <strong style="color: #ffffff;">' + custName + '</strong>, enter the 6-digit verification code below to authenticate your account session.</p>' +
+    '<div style="background-color: #27272a; padding: 24px; border-radius: 12px; border: 1px solid #f59e0b; margin: 24px 0; text-align: center;">' +
+      '<div style="font-size: 36px; font-weight: 800; letter-spacing: 12px; color: #f59e0b; font-family: monospace;">' + otp + '</div>' +
+      '<div style="font-size: 12px; color: #a1a1aa; margin-top: 10px; font-weight: 600; text-transform: uppercase;">⏱ Code Expires in 10 Minutes (Valid until ' + expiryStr + ' BST)</div>' +
+    '</div>' +
+    '<div style="background-color: #09090b; padding: 16px; border-radius: 8px; border-left: 4px solid #f59e0b; text-align: left; font-size: 13px; color: #d4d4d8; margin-top: 24px;">' +
+      '<strong style="color: #f59e0b;">Security Notice:</strong> Never share this OTP code with anyone, including ROYMEN personnel. If you did not initiate this request, please secure your account or contact our concierge support immediately.' +
+    '</div>' +
+  '</div>';
+
+  var htmlBody = buildBaseHtmlEmail('ROYMEN Login Verification', content);
+  var subject = 'Your ROYMEN Login Verification Code';
+
+  return queueAndSendEmail(email, 'Customer Login OTP', subject, htmlBody);
+}
+
+function sendCustomerOrderConfirmationEmail(order) {
+  var custName = order.customerName || 'Valued Customer';
+  var orderId = order.id || ('ORD-' + Date.now());
+  var orderDate = order.createdAt ? new Date(order.createdAt).toLocaleString('en-US', { timeZone: 'Asia/Dhaka' }) : new Date().toLocaleString('en-US', { timeZone: 'Asia/Dhaka' });
+  var paymentMethod = order.paymentMethod || 'Cash on Delivery';
+
+  // Format Items
+  var itemsList = [];
+  try {
+    if (typeof order.items === 'string') {
+      itemsList = JSON.parse(order.items);
+    } else if (Array.isArray(order.items)) {
+      itemsList = order.items;
+    }
+  } catch (e) {
+    itemsList = [];
+  }
+
+  var itemsHtml = '';
+  var totalQty = 0;
+
+  if (itemsList && itemsList.length > 0) {
+    itemsHtml += '<table class="table">' +
+      '<thead><tr><th>Product Item</th><th>Variant</th><th style="text-align: center;">Qty</th><th style="text-align: right;">Amount</th></tr></thead><tbody>';
+    
+    for (var i = 0; i < itemsList.length; i++) {
+      var it = itemsList[i];
+      var qty = it.quantity || it.qty || 1;
+      var price = it.price || 0;
+      totalQty += qty;
+      var variantStr = (it.color || it.variantColor || '') + (it.size || it.variantSize ? ' / ' + (it.size || it.variantSize) : '');
+      
+      itemsHtml += '<tr>' +
+        '<td><strong style="color: #ffffff;">' + (it.name || it.productName || 'ROYMEN Item') + '</strong></td>' +
+        '<td style="color: #a1a1aa; font-size: 13px;">' + (variantStr || 'Standard') + '</td>' +
+        '<td style="text-align: center; color: #ffffff;">' + qty + '</td>' +
+        '<td style="text-align: right; color: #f59e0b; font-weight: 600;">৳' + (price * qty).toLocaleString() + '</td>' +
+      '</tr>';
+    }
+    itemsHtml += '</tbody></table>';
+  } else {
+    itemsHtml = '<p style="color: #a1a1aa;">ROYMEN Bespoke Atelier Clothing & Apparel Package</p>';
+    totalQty = 1;
+  }
+
+  // Shipping address formatting
+  var addrStr = 'Not provided';
+  if (typeof order.shippingAddress === 'object' && order.shippingAddress !== null) {
+    var a = order.shippingAddress;
+    addrStr = [a.address, a.area, a.city || 'Dhaka', a.district, 'Bangladesh'].filter(Boolean).join(', ');
+  } else if (typeof order.shippingAddress === 'string') {
+    addrStr = order.shippingAddress;
+  }
+
+  var deliveryFee = order.deliveryFee !== undefined ? parseFloat(order.deliveryFee) : (order.shippingCharge !== undefined ? parseFloat(order.shippingCharge) : 80);
+  var subtotal = order.subtotal !== undefined ? parseFloat(order.subtotal) : parseFloat(order.total || 0) - deliveryFee;
+  var discount = order.discount !== undefined ? parseFloat(order.discount) : 0;
+  var grandTotal = order.total !== undefined ? parseFloat(order.total) : subtotal + deliveryFee - discount;
+
+  var content = '<div>' +
+    '<div style="text-align: center; margin-bottom: 24px;">' +
+      '<span class="badge">Order Confirmed • #' + orderId + '</span>' +
+      '<h2 style="font-size: 22px; margin: 16px 0 8px; color: #ffffff;">Thank You for Your Order</h2>' +
+      '<p style="color: #a1a1aa; margin: 0;">Dear <strong style="color: #ffffff;">' + custName + '</strong>, your bespoke order has been recorded and is currently being prepared by our master tailors.</p>' +
+    '</div>' +
+
+    '<div style="background-color: #27272a; padding: 20px; border-radius: 12px; margin-bottom: 24px; border: 1px solid #3f3f46;">' +
+      '<div style="display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 8px;">' +
+        '<span style="color: #a1a1aa;">Order ID:</span> <strong style="color: #ffffff;">#' + orderId + '</strong>' +
+      '</div>' +
+      '<div style="display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 8px;">' +
+        '<span style="color: #a1a1aa;">Order Date:</span> <span style="color: #ffffff;">' + orderDate + '</span>' +
+      '</div>' +
+      '<div style="display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 8px;">' +
+        '<span style="color: #a1a1aa;">Payment Method:</span> <strong style="color: #f59e0b;">' + paymentMethod + '</strong>' +
+      '</div>' +
+      '<div style="display: flex; justify-content: space-between; font-size: 13px;">' +
+        '<span style="color: #a1a1aa;">Estimated Delivery:</span> <span style="color: #34d399; font-weight: 600;">2-3 Business Days (Dhaka) / 3-5 Days (Outside)</span>' +
+      '</div>' +
+    '</div>' +
+
+    '<h3 style="font-size: 16px; color: #f59e0b; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 1px;">Products Ordered</h3>' +
+    itemsHtml +
+
+    '<div class="total-box">' +
+      '<div style="display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 6px; color: #d4d4d8;">' +
+        '<span>Total Items:</span> <span>' + totalQty + ' Pcs</span>' +
+      '</div>' +
+      '<div style="display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 6px; color: #d4d4d8;">' +
+        '<span>Subtotal:</span> <span>৳' + subtotal.toLocaleString() + '</span>' +
+      '</div>' +
+      '<div style="display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 6px; color: #34d399;">' +
+        '<span>Discount:</span> <span>-৳' + discount.toLocaleString() + '</span>' +
+      '</div>' +
+      '<div style="display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 12px; color: #d4d4d8;">' +
+        '<span>Shipping Charge:</span> <span>৳' + deliveryFee.toLocaleString() + '</span>' +
+      '</div>' +
+      '<hr style="border: 0; border-top: 1px solid #52525b; margin: 10px 0;" />' +
+      '<div style="display: flex; justify-content: space-between; font-size: 18px; font-weight: 800; color: #ffffff;">' +
+        '<span>Total Amount:</span> <span style="color: #f59e0b;">৳' + grandTotal.toLocaleString() + '</span>' +
+      '</div>' +
+    '</div>' +
+
+    '<div style="margin-top: 24px; padding: 16px; background-color: #27272a; border-radius: 8px;">' +
+      '<h4 style="margin: 0 0 6px; font-size: 14px; color: #ffffff;">Shipping Address:</h4>' +
+      '<p style="margin: 0; font-size: 13px; color: #a1a1aa;">' + addrStr + '</p>' +
+    '</div>' +
+  '</div>';
+
+  var htmlBody = buildBaseHtmlEmail('ROYMEN Order Confirmation - #' + orderId, content);
+  var subject = 'Your ROYMEN Order Confirmation - Order #' + orderId;
+
+  return queueAndSendEmail(order.customerEmail, 'Order Confirmation', subject, htmlBody);
+}
+
+function sendAdminNewOrderAlertEmail(order) {
+  var primaryAdmin = getSettingValue('adminNotificationEmail') || APP_CONFIG.DEFAULT_ADMIN_EMAIL || 'admin@roymen.com.bd';
+  var additionalAdmins = getSettingValue('additionalAdminEmails') || '';
+  
+  var combinedAdminsRaw = primaryAdmin + ',' + additionalAdmins;
+  var adminEmails = combinedAdminsRaw.split(/[,;]+/).map(function(e) { return e.trim(); }).filter(function(e) { return e.length > 0 && e.indexOf('@') !== -1; });
+  
+  // Deduplicate admin recipient emails
+  var uniqueAdminEmails = [];
+  for (var k = 0; k < adminEmails.length; k++) {
+    if (uniqueAdminEmails.indexOf(adminEmails[k]) === -1) {
+      uniqueAdminEmails.push(adminEmails[k]);
+    }
+  }
+
+  var orderId = order.id || order.orderId || ('ORD-' + Date.now());
+  var customerName = order.customerName || order.name || 'Valued Customer';
+  var customerEmail = order.customerEmail || order.email || 'N/A';
+  var customerPhone = order.customerPhone || order.phone || 'N/A';
+  var totalAmount = order.total !== undefined ? parseFloat(order.total).toLocaleString() : '0';
+  var paymentMethod = order.paymentMethod || 'Cash on Delivery';
+  var orderDate = order.createdAt ? new Date(order.createdAt).toLocaleString('en-US', { timeZone: 'Asia/Dhaka' }) : new Date().toLocaleString('en-US', { timeZone: 'Asia/Dhaka' });
+  var orderUrl = order.orderUrl || ('https://roymen.com.bd/admin?orderId=' + orderId);
+
+  var content = '<div style="font-family: inherit; font-size: 15px; color: #f4f4f5; line-height: 1.6;">' +
+    '<p style="margin-top: 0; font-size: 16px;">Hello Admin,</p>' +
+    '<p style="font-size: 15px;">A new order has been received on <strong>ROYMEN</strong>.</p>' +
+    
+    '<div style="background-color: #27272a; border: 1px solid #3f3f46; border-radius: 12px; padding: 20px; margin: 20px 0;">' +
+      '<h3 style="margin-top: 0; margin-bottom: 16px; color: #f59e0b; font-size: 16px; border-bottom: 1px solid #3f3f46; padding-bottom: 8px; text-transform: uppercase; letter-spacing: 1px;">Order Information</h3>' +
+      '<p style="margin: 0 0 12px;"><strong>Order ID:</strong><br><span style="color: #ffffff; font-size: 16px; font-weight: 700;">#' + orderId + '</span></p>' +
+      '<p style="margin: 0 0 12px;"><strong>Customer:</strong><br><span style="color: #ffffff;">' + customerName + '</span></p>' +
+      '<p style="margin: 0 0 12px;"><strong>Customer Email:</strong><br><a href="mailto:' + customerEmail + '" style="color: #38bdf8;">' + customerEmail + '</a></p>' +
+      '<p style="margin: 0 0 12px;"><strong>Customer Phone:</strong><br><a href="tel:' + customerPhone + '" style="color: #38bdf8;">' + customerPhone + '</a></p>' +
+      '<p style="margin: 0 0 12px;"><strong>Total Amount:</strong><br><span style="color: #f59e0b; font-size: 18px; font-weight: 800;">৳' + totalAmount + '</span></p>' +
+      '<p style="margin: 0 0 12px;"><strong>Payment Method:</strong><br><span style="color: #ffffff;">' + paymentMethod + '</span></p>' +
+      '<p style="margin: 0;"><strong>Order Date:</strong><br><span style="color: #ffffff;">' + orderDate + '</span></p>' +
+    '</div>' +
+
+    '<p style="font-size: 15px;">Please review and process this order from the Admin Dashboard.</p>' +
+
+    '<p style="margin: 24px 0;">' +
+      '<strong>View Order:</strong><br>' +
+      '<a href="' + orderUrl + '" class="btn" target="_blank" style="display: inline-block; padding: 12px 24px; background-color: #f59e0b; color: #09090b; font-weight: 700; text-decoration: none; border-radius: 8px; margin-top: 8px;">View Order #' + orderId + '</a>' +
+    '</p>' +
+
+    '<p style="margin-bottom: 4px;">Thank you,</p>' +
+    '<p style="margin-top: 0; font-weight: 700; color: #f59e0b; letter-spacing: 1px;">ROYMEN<br><span style="font-weight: 400; font-size: 12px; color: #a1a1aa;">Wear Confidence</span></p>' +
+
+    '<p style="font-size: 12px; color: #71717a; border-top: 1px solid #27272a; padding-top: 12px; margin-top: 24px;">This is an automated system notification.<br>Please do not reply to this email.</p>' +
+  '</div>';
+
+  var htmlBody = buildBaseHtmlEmail('Admin Order Notification - #' + orderId, content);
+  var subject = '🚨 New Order Received - #' + orderId;
+
+  var results = [];
+  for (var m = 0; m < uniqueAdminEmails.length; m++) {
+    var res = queueAndSendEmail(uniqueAdminEmails[m], 'Admin Alert', subject, htmlBody);
+    results.push(res);
+  }
+
+  return results;
 }
 `
   },
