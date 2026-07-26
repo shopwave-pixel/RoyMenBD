@@ -7,9 +7,10 @@ interface AuthModalProps {
   isOpen: boolean;
   onClose: () => void;
   onAuthSuccess: (user: User) => void;
+  noticeMessage?: string;
 }
 
-export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthSuccess }) => {
+export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthSuccess, noticeMessage }) => {
   const [step, setStep] = useState<'email' | 'otp' | 'admin_password' | 'admin_secret_code'>('email');
   const [email, setEmail] = useState('');
   const [otpInput, setOtpInput] = useState('');
@@ -141,6 +142,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthSuc
             {step === 'admin_secret_code' && 'Step 2 of 2: Enter administrator 6-digit Secret Code.'}
           </p>
         </div>
+
+        {noticeMessage && (
+          <div className="mb-4 p-3.5 bg-amber-500/10 border border-amber-500/30 rounded-2xl text-amber-200 text-xs flex items-center gap-2.5 shadow-sm">
+            <Lock className="w-4 h-4 text-amber-400 shrink-0" />
+            <span className="font-semibold leading-relaxed">{noticeMessage}</span>
+          </div>
+        )}
 
         {errorMessage && (
           <div className="mb-4 p-3 bg-red-950/60 border border-red-800/80 rounded-xl text-red-200 text-xs flex items-center gap-2">

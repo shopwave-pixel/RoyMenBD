@@ -353,11 +353,17 @@ function doPost(e) {
         return createJsonResponse(secRes, secRes.success, secRes.message);
 
       case 'sendOTP':
-        var otpRes = generateAndSendOTP(payload.email, payload.name);
+        var targetEmail = payload.email || payload.Email || payload.customerEmail || payload.userEmail || postData.email || postData.Email || '';
+        var targetName = payload.name || payload.Name || payload.customerName || postData.name || '';
+        var otpRes = generateAndSendOTP(targetEmail, targetName);
         return createJsonResponse(otpRes, otpRes.success, otpRes.message);
 
       case 'placeOrder':
       case 'POST_ORDER':
+        var custEmail = (payload.customerEmail || payload.email || payload.Email || '').toString().trim();
+        if (!custEmail || custEmail.indexOf('@') === -1) {
+          return createErrorResponse('401 Unauthorized: Mandatory customer authentication is required before placing an order.');
+        }
         var orderId = saveOrderToSheet(payload);
         payload.id = orderId;
         // Automatically send Customer Order Confirmation Email directly
@@ -698,24 +704,42 @@ function verifyAdminSecretCodeInSheet(email, secretInput, rememberMe) {
  */
 
 function generateAndSendOTP(email, name) {
+  var targetEmail = '';
+  if (typeof email === 'string') {
+    targetEmail = email;
+  } else if (email && typeof email === 'object') {
+    targetEmail = email.email || email.Email || email.customerEmail || email.userEmail || '';
+    if (!name && email.name) {
+      name = email.name;
+    }
+  }
+
+  targetEmail = (targetEmail || '').toString().trim();
+
+  if (!targetEmail || targetEmail.indexOf('@') === -1) {
+    Logger.log('generateAndSendOTP Error: Invalid or missing email address: "' + targetEmail + '"');
+    return { success: false, message: 'Invalid or missing recipient email address.' };
+  }
+
   var otp = Math.floor(100000 + Math.random() * 900000).toString();
   var custName = name || 'Valued Customer';
   
-  if (!name) {
+  if (!name || custName === 'Valued Customer') {
     try {
-      var userRow = findRowInSheet(SHEETS.USERS, 'Email', email);
+      var userRow = findRowInSheet(SHEETS.USERS, 'Email', targetEmail);
       if (userRow && userRow.Name) {
         custName = userRow.Name;
       }
     } catch (e) {}
   }
 
-  try {
-    sendCustomerOTPEmail(email, otp, custName);
-  } catch (err) {
-    Logger.log('OTP Mail Error: ' + err.toString());
-  }
-  return { success: true, otp: otp, message: 'Login OTP verification code dispatched.' };
+  var sendResult = sendCustomerOTPEmail(targetEmail, otp, custName);
+
+  return { 
+    success: sendResult && sendResult.success !== false, 
+    otp: otp, 
+    message: sendResult && sendResult.success !== false ? 'Login OTP verification code dispatched.' : 'OTP generated, but email delivery failed: ' + (sendResult ? sendResult.error : 'Unknown error') 
+  };
 }
 `
   },
@@ -1233,8 +1257,29 @@ function queueAndSendEmail(recipient, category, subject, htmlBody) {
     sheet = ss.getSheetByName('Email_Log') || ss.getSheetByName(SHEETS.EMAIL_LOG);
   }
 
+  var normRecipient = (recipient || '').toString().trim();
+
+  // Validate Recipient Address
+  if (!normRecipient || normRecipient === '' || normRecipient.indexOf('@') === -1) {
+    var errMsg = 'Failed to send email: no recipient or invalid email address ("' + recipient + '")';
+    Logger.log('Email Send Validation Error: ' + errMsg);
+    if (sheet) {
+      sheet.appendRow([
+        'EML-' + Date.now() + '-' + Math.floor(1000 + Math.random() * 9000),
+        recipient || 'NO_RECIPIENT',
+        category || 'System',
+        subject || 'No Subject',
+        'FAILED',
+        '',
+        1,
+        errMsg
+      ]);
+    }
+    return { success: false, status: 'FAILED', error: errMsg };
+  }
+
   // Prevent Duplicate Emails (check if same recipient and subject logged in the last 60 seconds)
-  var normRecipient = (recipient || '').trim().toLowerCase();
+  var lowerRecipient = normRecipient.toLowerCase();
   var nowIso = new Date().toISOString();
   
   if (sheet) {
@@ -1247,8 +1292,8 @@ function queueAndSendEmail(recipient, category, subject, htmlBody) {
         var rowStatus = (logs[i][4] || '').toString();
         var rowTime = logs[i][5] ? new Date(logs[i][5]).getTime() : 0;
         
-        if (rowRecip === normRecipient && rowSubj === subject && rowStatus === 'SENT' && rowTime > recentCutoff) {
-          Logger.log('Duplicate email prevented for: ' + normRecipient + ' (' + subject + ')');
+        if (rowRecip === lowerRecipient && rowSubj === subject && rowStatus === 'SENT' && rowTime > recentCutoff) {
+          Logger.log('Duplicate email prevented for: ' + lowerRecipient + ' (' + subject + ')');
           return { success: true, duplicatePrevented: true };
         }
       }
@@ -1264,12 +1309,12 @@ function queueAndSendEmail(recipient, category, subject, htmlBody) {
   try {
     // Attempt dispatch via GmailApp / MailApp
     if (typeof GmailApp !== 'undefined' && GmailApp.sendEmail) {
-      GmailApp.sendEmail(recipient, subject, 'Please view this email in an HTML compatible mail client.', {
+      GmailApp.sendEmail(normRecipient, subject, 'Please view this email in an HTML compatible mail client.', {
         htmlBody: htmlBody,
         name: 'ROYMEN Concierge'
       });
     } else {
-      MailApp.sendEmail(recipient, subject, 'Please view this email in an HTML compatible mail client.', {
+      MailApp.sendEmail(normRecipient, subject, 'Please view this email in an HTML compatible mail client.', {
         htmlBody: htmlBody,
         name: 'ROYMEN Concierge'
       });
@@ -1277,18 +1322,19 @@ function queueAndSendEmail(recipient, category, subject, htmlBody) {
 
     status = 'SENT';
     sentTime = nowIso;
+    Logger.log('Email successfully sent to: ' + normRecipient + ' [' + subject + ']');
   } catch (err) {
     status = 'FAILED';
     errorMessage = err.toString();
     retryCount = 1;
-    Logger.log('Email Send Failure: ' + errorMessage);
+    Logger.log('Email Send Failure to ' + normRecipient + ': ' + errorMessage);
   }
 
   // Record in Email_Log
   if (sheet) {
     sheet.appendRow([
       emailId,
-      recipient,
+      normRecipient,
       category,
       subject,
       status,
@@ -1315,9 +1361,14 @@ function processFailedEmailQueue() {
     var retryCount = parseInt(data[i][6] || 0, 10);
 
     if ((rowStatus === 'FAILED' || rowStatus === 'QUEUED') && retryCount < 3) {
-      var recipient = data[i][1];
+      var recipient = (data[i][1] || '').toString().trim();
       var subject = data[i][3];
       
+      if (!recipient || recipient.indexOf('@') === -1) {
+        sheet.getRange(i + 1, 8).setValue('Failed to retry: no valid recipient email');
+        continue;
+      }
+
       try {
         MailApp.sendEmail(recipient, subject, 'ROYMEN Notification Retry', { name: 'ROYMEN Concierge' });
         sheet.getRange(i + 1, 5).setValue('SENT');
@@ -1334,6 +1385,12 @@ function processFailedEmailQueue() {
 }
 
 function sendCustomerOTPEmail(email, otp, name) {
+  var targetEmail = (email || '').toString().trim();
+  if (!targetEmail || targetEmail.indexOf('@') === -1) {
+    Logger.log('sendCustomerOTPEmail Error: invalid or missing recipient email: "' + targetEmail + '"');
+    return { success: false, error: 'No recipient email address provided.' };
+  }
+
   var custName = name || 'Valued Customer';
   var expiryDate = new Date(Date.now() + 10 * 60 * 1000);
   var expiryStr = expiryDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Dhaka' });
@@ -1354,12 +1411,20 @@ function sendCustomerOTPEmail(email, otp, name) {
   var htmlBody = buildBaseHtmlEmail('ROYMEN Login Verification', content);
   var subject = 'Your ROYMEN Login Verification Code';
 
-  return queueAndSendEmail(email, 'Customer Login OTP', subject, htmlBody);
+  return queueAndSendEmail(targetEmail, 'Customer Login OTP', subject, htmlBody);
 }
 
 function sendCustomerOrderConfirmationEmail(order) {
-  var custName = order.customerName || 'Valued Customer';
-  var orderId = order.id || ('ORD-' + Date.now());
+  if (!order) return { success: false, error: 'No order object provided.' };
+  var custName = order.customerName || order.name || 'Valued Customer';
+  var targetEmail = (order.customerEmail || order.email || order.Email || order.userEmail || '').toString().trim();
+  
+  if (!targetEmail || targetEmail.indexOf('@') === -1) {
+    Logger.log('sendCustomerOrderConfirmationEmail Error: missing recipient email address.');
+    return { success: false, error: 'No recipient email address found in order data.' };
+  }
+
+  var orderId = order.id || order.orderId || ('ORD-' + Date.now());
   var orderDate = order.createdAt ? new Date(order.createdAt).toLocaleString('en-US', { timeZone: 'Asia/Dhaka' }) : new Date().toLocaleString('en-US', { timeZone: 'Asia/Dhaka' });
   var paymentMethod = order.paymentMethod || 'Cash on Delivery';
 
@@ -1469,7 +1534,7 @@ function sendCustomerOrderConfirmationEmail(order) {
   var htmlBody = buildBaseHtmlEmail('ROYMEN Order Confirmation - #' + orderId, content);
   var subject = 'Your ROYMEN Order Confirmation - Order #' + orderId;
 
-  return queueAndSendEmail(order.customerEmail, 'Order Confirmation', subject, htmlBody);
+  return queueAndSendEmail(targetEmail, 'Order Confirmation', subject, htmlBody);
 }
 
 function sendAdminNewOrderAlertEmail(order) {
@@ -1485,6 +1550,10 @@ function sendAdminNewOrderAlertEmail(order) {
     if (uniqueAdminEmails.indexOf(adminEmails[k]) === -1) {
       uniqueAdminEmails.push(adminEmails[k]);
     }
+  }
+
+  if (uniqueAdminEmails.length === 0) {
+    uniqueAdminEmails.push('admin@roymen.com.bd');
   }
 
   var orderId = order.id || order.orderId || ('ORD-' + Date.now());

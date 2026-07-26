@@ -63,6 +63,8 @@ export default function App() {
   const [isWishlistOpen, setIsWishlistOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isAuthOpen, setIsAuthOpen] = useState(false);
+  const [authNoticeMessage, setAuthNoticeMessage] = useState<string>('');
+  const [pendingCheckoutAfterAuth, setPendingCheckoutAfterAuth] = useState<boolean>(false);
   const [isSizeGuideOpen, setIsSizeGuideOpen] = useState(false);
   const [quickViewProduct, setQuickViewProduct] = useState<Product | null>(null);
 
@@ -113,10 +115,21 @@ export default function App() {
     setIsCartOpen(true);
   };
 
+  // Trigger mandatory authentication checkout flow
+  const triggerCheckoutFlow = () => {
+    if (!currentUser) {
+      setAuthNoticeMessage('Please sign in to continue with your purchase.');
+      setPendingCheckoutAfterAuth(true);
+      setIsAuthOpen(true);
+    } else {
+      setCurrentView('checkout');
+    }
+  };
+
   // Handle Buy Now
   const handleBuyNow = (product: Product, color: ProductColor, size: string) => {
     handleAddToCart(product, color, size);
-    setCurrentView('checkout');
+    triggerCheckoutFlow();
   };
 
   // Handle Toggle Wishlist
@@ -131,6 +144,8 @@ export default function App() {
     if (view === 'category' && param) {
       setSelectedCategorySlug(param);
       setCurrentView('shop');
+    } else if (view === 'checkout') {
+      triggerCheckoutFlow();
     } else {
       setCurrentView(view);
     }
@@ -218,11 +233,20 @@ export default function App() {
 
         <AuthModal
           isOpen={isAuthOpen}
-          onClose={() => setIsAuthOpen(false)}
+          noticeMessage={authNoticeMessage}
+          onClose={() => {
+            setIsAuthOpen(false);
+            setAuthNoticeMessage('');
+          }}
           onAuthSuccess={usr => {
             setCurrentUser(usr);
+            setAuthNoticeMessage('');
             if (usr.role === 'admin') {
               setCurrentView('admin');
+              setPendingCheckoutAfterAuth(false);
+            } else if (pendingCheckoutAfterAuth) {
+              setPendingCheckoutAfterAuth(false);
+              setCurrentView('checkout');
             } else {
               setCurrentView('account');
             }
@@ -488,6 +512,11 @@ export default function App() {
               setCartItems([]);
               setAppliedCoupon(null);
             }}
+            onRequireAuth={() => {
+              setAuthNoticeMessage('Please sign in to continue with your purchase.');
+              setPendingCheckoutAfterAuth(true);
+              setIsAuthOpen(true);
+            }}
           />
         )}
 
@@ -528,7 +557,10 @@ export default function App() {
           }
         }}
         onRemoveItem={id => setCartItems(prev => prev.filter(i => i.id !== id))}
-        onProceedToCheckout={() => setCurrentView('checkout')}
+        onProceedToCheckout={() => {
+          setIsCartOpen(false);
+          triggerCheckoutFlow();
+        }}
         appliedCoupon={appliedCoupon}
         onApplyCoupon={(coup, discount) => setAppliedCoupon(coup)}
       />
@@ -555,11 +587,20 @@ export default function App() {
 
       <AuthModal
         isOpen={isAuthOpen}
-        onClose={() => setIsAuthOpen(false)}
+        noticeMessage={authNoticeMessage}
+        onClose={() => {
+          setIsAuthOpen(false);
+          setAuthNoticeMessage('');
+        }}
         onAuthSuccess={usr => {
           setCurrentUser(usr);
+          setAuthNoticeMessage('');
           if (usr.role === 'admin') {
             setCurrentView('admin');
+            setPendingCheckoutAfterAuth(false);
+          } else if (pendingCheckoutAfterAuth) {
+            setPendingCheckoutAfterAuth(false);
+            setCurrentView('checkout');
           } else {
             setCurrentView('account');
           }

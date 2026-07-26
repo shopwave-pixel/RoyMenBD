@@ -23,6 +23,7 @@ interface CheckoutPageProps {
   currentUser: User | null;
   onBackToShop: () => void;
   onOrderPlaced: (order: Order) => void;
+  onRequireAuth?: () => void;
 }
 
 export const CheckoutPage: React.FC<CheckoutPageProps> = ({
@@ -30,7 +31,8 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
   appliedCoupon,
   currentUser,
   onBackToShop,
-  onOrderPlaced
+  onOrderPlaced,
+  onRequireAuth
 }) => {
   const [customerName, setCustomerName] = useState(currentUser?.name || '');
   const [customerEmail, setCustomerEmail] = useState(currentUser?.email || '');
@@ -39,6 +41,15 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
   const [district, setDistrict] = useState('Dhaka');
   const [area, setArea] = useState('');
   const [notes, setNotes] = useState('');
+
+  // Sync state if user logs in while on checkout
+  React.useEffect(() => {
+    if (currentUser) {
+      if (!customerName) setCustomerName(currentUser.name || '');
+      if (!customerEmail) setCustomerEmail(currentUser.email || '');
+      if (!customerPhone || customerPhone === '+880 ') setCustomerPhone(currentUser.phone || '+880 ');
+    }
+  }, [currentUser]);
   
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('bKash');
   const [bkashTxnId, setBkashTxnId] = useState('');
@@ -69,6 +80,15 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
 
   const handlePlaceOrder = (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!currentUser) {
+      alert('Please sign in to continue with your purchase.');
+      if (onRequireAuth) {
+        onRequireAuth();
+      }
+      return;
+    }
+
     if (!customerName || !customerEmail || !customerPhone || !addressLine) {
       alert('Please fill in all required shipping address details.');
       return;
@@ -205,6 +225,29 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
               Orders placed before 4:00 PM are dispatched same-day from our Gulshan Atelier.
             </p>
           </div>
+
+          {!currentUser && (
+            <div className="bg-amber-500/10 border border-amber-500/30 rounded-3xl p-6 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-xl">
+              <div className="flex items-center gap-3.5">
+                <div className="w-12 h-12 bg-amber-500/20 border border-amber-500/40 rounded-2xl flex items-center justify-center text-amber-400 shrink-0">
+                  <Lock className="w-6 h-6" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-black uppercase tracking-wider text-amber-300">Sign In Required For Checkout</h4>
+                  <p className="text-xs text-zinc-300 leading-relaxed mt-0.5">
+                    Please sign in to your ROYMEN account to complete your purchase. Guest checkout is disabled.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={onRequireAuth}
+                className="w-full sm:w-auto bg-amber-500 hover:bg-amber-400 text-black font-black px-6 py-3 rounded-xl uppercase text-xs tracking-wider transition-all shadow-lg shrink-0"
+              >
+                Sign In / Register
+              </button>
+            </div>
+          )}
 
           <form onSubmit={handlePlaceOrder} className="space-y-6">
             
