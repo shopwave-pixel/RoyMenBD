@@ -355,7 +355,8 @@ function doPost(e) {
       case 'sendOTP':
         var targetEmail = payload.email || payload.Email || payload.customerEmail || payload.userEmail || postData.email || postData.Email || '';
         var targetName = payload.name || payload.Name || payload.customerName || postData.name || '';
-        var otpRes = generateAndSendOTP(targetEmail, targetName);
+        var targetOtp = payload.otp || payload.OTP || postData.otp || '';
+        var otpRes = generateAndSendOTP(targetEmail, targetName, targetOtp);
         return createJsonResponse(otpRes, otpRes.success, otpRes.message);
 
       case 'placeOrder':
@@ -703,7 +704,7 @@ function verifyAdminSecretCodeInSheet(email, secretInput, rememberMe) {
  * Authentication.gs - Email OTP Dispatcher & Customer Session Manager
  */
 
-function generateAndSendOTP(email, name) {
+function generateAndSendOTP(email, name, customOtp) {
   var targetEmail = '';
   if (typeof email === 'string') {
     targetEmail = email;
@@ -711,6 +712,9 @@ function generateAndSendOTP(email, name) {
     targetEmail = email.email || email.Email || email.customerEmail || email.userEmail || '';
     if (!name && email.name) {
       name = email.name;
+    }
+    if (!customOtp && email.otp) {
+      customOtp = email.otp;
     }
   }
 
@@ -721,7 +725,10 @@ function generateAndSendOTP(email, name) {
     return { success: false, message: 'Invalid or missing recipient email address.' };
   }
 
-  var otp = Math.floor(100000 + Math.random() * 900000).toString();
+  var otp = (customOtp || '').toString().trim();
+  if (!otp) {
+    otp = Math.floor(100000 + Math.random() * 900000).toString();
+  }
   var custName = name || 'Valued Customer';
   
   if (!name || custName === 'Valued Customer') {
@@ -733,12 +740,14 @@ function generateAndSendOTP(email, name) {
     } catch (e) {}
   }
 
+  Logger.log('generateAndSendOTP Dispatched: Recipient="' + targetEmail + '" Name="' + custName + '" OTP="' + otp + '"');
   var sendResult = sendCustomerOTPEmail(targetEmail, otp, custName);
 
   return { 
     success: sendResult && sendResult.success !== false, 
     otp: otp, 
-    message: sendResult && sendResult.success !== false ? 'Login OTP verification code dispatched.' : 'OTP generated, but email delivery failed: ' + (sendResult ? sendResult.error : 'Unknown error') 
+    recipient: targetEmail,
+    message: sendResult && sendResult.success !== false ? 'Login OTP verification code dispatched to ' + targetEmail : 'OTP generated, but email delivery failed: ' + (sendResult ? sendResult.error : 'Unknown error') 
   };
 }
 `

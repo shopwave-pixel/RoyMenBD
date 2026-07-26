@@ -54,7 +54,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthSuc
         setInfoMessage('Administrator Account Detected. Please enter password.');
       } else {
         // Customer or New Customer
-        StorageService.sendOTP(email.trim());
+        const otpRes = StorageService.sendOTP(email.trim());
+        if (!otpRes.success) {
+          setErrorMessage(otpRes.message);
+          return;
+        }
         setStep('otp');
       }
     }, 500);

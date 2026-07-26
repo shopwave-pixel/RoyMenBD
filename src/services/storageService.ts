@@ -319,6 +319,13 @@ export class StorageService {
 
   static sendOTP(email: string): { success: boolean; message: string } {
     const normEmail = email.trim().toLowerCase();
+    if (!normEmail || !normEmail.includes('@')) {
+      return {
+        success: false,
+        message: 'Please enter a valid email address.'
+      };
+    }
+
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     const expiry = Date.now() + 10 * 60 * 1000; // 10 minutes
 
@@ -326,13 +333,13 @@ export class StorageService {
     const otpData = { email: normEmail, otp, expiry };
     localStorage.setItem('roymen_pending_otp_' + normEmail, JSON.stringify(otpData));
 
-    // Dispatch request to Google Apps Script backend to send email
+    // Dispatch request to Google Apps Script backend to send email directly to the customer's recipient address
     this.triggerGoogleSheetSync('sendOTP', { email: normEmail, name: normEmail.split('@')[0] })
       .catch(err => console.error('GAS OTP dispatch error:', err));
 
     return {
       success: true,
-      message: `An OTP verification code has been dispatched to ${email}. Please check your inbox.`
+      message: `An OTP verification code has been dispatched to ${normEmail}. Please check your inbox.`
     };
   }
 
