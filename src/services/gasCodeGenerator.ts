@@ -81,13 +81,20 @@ var SHEETS = {
   PAYMENT_SETTINGS: '27_Payment_Settings',
   SHIPPING_SETTINGS: '28_Shipping_Settings',
   APP_SETTINGS: '29_App_Settings',
-  BACKUP_LOG: '30_Backup_Log'
+  BACKUP_LOG: '30_Backup_Log',
+  OTP_STORE: 'OTP_Store',
+  CUSTOMER_LOGIN: 'Customer_Login',
+  LOGIN_LOG: 'Login_Log',
+  SYSTEM_ERROR_LOG: 'System_Error_Log',
+  CUSTOMER_SESSIONS: 'Customer_Sessions',
+  PAYMENT_LOG: 'Payment_Log',
+  ACTIVITY_LOG: 'Activity_Log'
 };
 
 var SCHEMAS = {
   '01_Settings': ['Key', 'Value', 'UpdatedAt'],
   '02_Admins': ['AdminID', 'Name', 'Email', 'PasswordHash', 'SecretCode', 'Role', 'Status', 'FailedAttempts', 'LockedUntil', 'LastLogin', 'RememberToken', 'CreatedAt', 'UpdatedAt'],
-  '03_Users': ['ID', 'Name', 'Email', 'Phone', 'Role', 'Status', 'Addresses', 'CreatedAt'],
+  '03_Users': ['ID', 'Name', 'Email', 'Phone', 'PasswordHash', 'Role', 'Status', 'Addresses', 'CreatedAt', 'UpdatedAt', 'LastLogin', 'LoginCount', 'Device', 'Browser'],
   '04_Products': ['ID', 'Name', 'Slug', 'SKU', 'Barcode', 'Category', 'Brand', 'Collection', 'Price', 'DiscountPrice', 'Stock', 'LowStockAlert', 'Colors', 'Sizes', 'Images', 'Featured', 'Status', 'CreatedAt'],
   '05_ProductVariants': ['ID', 'ProductID', 'SKU', 'Color', 'Size', 'Stock', 'Price', 'Status'],
   '06_Categories': ['ID', 'Name', 'Slug', 'Image', 'ItemCount', 'Description'],
@@ -101,7 +108,7 @@ var SCHEMAS = {
   '14_Analytics': ['Date', 'Views', 'Orders', 'Revenue', 'ConversionRate', 'AvgOrderValue'],
   '15_Visitors': ['ID', 'IP', 'Device', 'Path', 'Timestamp'],
   '16_Wishlist': ['ID', 'UserID', 'ProductID', 'AddedAt'],
-  '17_Cart': ['ID', 'UserID', 'ProductID', 'VariantColor', 'VariantSize', 'Quantity'],
+  '17_Cart': ['ID', 'UserID', 'ProductID', 'VariantColor', 'VariantSize', 'Quantity', 'UpdatedAt'],
   '18_Newsletter': ['ID', 'Email', 'SubscribedAt', 'Status'],
   '19_Contacts': ['ID', 'Name', 'Email', 'Phone', 'Subject', 'Message', 'Status', 'CreatedAt'],
   '20_Notifications': ['ID', 'Type', 'Title', 'Message', 'Read', 'Timestamp'],
@@ -115,7 +122,14 @@ var SCHEMAS = {
   '27_Payment_Settings': ['Gateway', 'Enabled', 'MerchantID', 'Mode', 'LastUpdated'],
   '28_Shipping_Settings': ['Zone', 'FeeInsideDhaka', 'FeeOutsideDhaka', 'FreeShippingMin', 'CourierPartner'],
   '29_App_Settings': ['AppName', 'Tagline', 'CurrencySymbol', 'Country', 'SupportEmail', 'SupportPhone'],
-  '30_Backup_Log': ['BackupID', 'SheetName', 'RowCount', 'Timestamp', 'Status']
+  '30_Backup_Log': ['BackupID', 'SheetName', 'RowCount', 'Timestamp', 'Status'],
+  'OTP_Store': ['Email', 'OTP', 'CreatedAt', 'ExpiresAt', 'Status', 'UsedAt'],
+  'Customer_Login': ['ID', 'Email', 'LoginTime', 'IP', 'Browser', 'Device', 'Status'],
+  'Login_Log': ['ID', 'Email', 'LoginTime', 'Status', 'IP', 'Browser', 'Device', 'Reason'],
+  'System_Error_Log': ['ID', 'Timestamp', 'Module', 'Function', 'ErrorMessage', 'StackTrace', 'User'],
+  'Customer_Sessions': ['SessionID', 'UserID', 'Email', 'Token', 'CreatedAt', 'ExpiresAt', 'Status'],
+  'Payment_Log': ['PaymentID', 'OrderID', 'Amount', 'Gateway', 'TransactionID', 'Status', 'Timestamp'],
+  'Activity_Log': ['ID', 'User', 'Action', 'Target', 'Details', 'Timestamp']
 };
 `
   },
@@ -359,6 +373,12 @@ function doPost(e) {
         var otpRes = generateAndSendOTP(targetEmail, targetName, targetOtp);
         return createJsonResponse(otpRes, otpRes.success, otpRes.message);
 
+      case 'verifyOTP':
+        var vEmail = payload.email || payload.Email || postData.email || '';
+        var vOtp = payload.otp || payload.OTP || postData.otp || '';
+        var vRes = verifyCustomerOTP(vEmail, vOtp);
+        return createJsonResponse(vRes, vRes.success, vRes.message);
+
       case 'placeOrder':
       case 'POST_ORDER':
         var custEmail = (payload.customerEmail || payload.email || payload.Email || '').toString().trim();
@@ -382,6 +402,37 @@ function doPost(e) {
         var prdId = saveOrUpdateProduct(payload);
         logAuditTrail('ADMIN', 'UPDATE_PRODUCT', SHEETS.PRODUCTS, 'Product saved: ' + payload.name);
         return createJsonResponse({ productId: prdId }, true, 'Product saved successfully.');
+
+      case 'registerCustomer':
+      case 'saveCustomer':
+        var custRes = saveOrUpdateCustomer(payload);
+        return createJsonResponse({ customer: custRes }, true, 'Customer saved successfully.');
+
+      case 'updateProfile':
+        var profileRes = saveOrUpdateCustomer(payload);
+        return createJsonResponse({ customer: profileRes }, true, 'Customer profile updated.');
+
+      case 'saveCartItem':
+      case 'saveCart':
+        var cartRes = saveCartItem(payload);
+        return createJsonResponse({ cartId: cartRes }, true, 'Cart item saved.');
+
+      case 'saveWishlistItem':
+      case 'saveWishlist':
+        var wishRes = saveWishlistItem(payload.userId || payload.email, payload.productId);
+        return createJsonResponse({ wishlistId: wishRes }, true, 'Wishlist item saved.');
+
+      case 'submitReview':
+        var revRes = saveReview(payload);
+        return createJsonResponse({ reviewId: revRes }, true, 'Review submitted successfully.');
+
+      case 'logLogin':
+        logLoginAttempt(payload.email, payload.status, payload.ip, payload.browser, payload.device, payload.reason);
+        return createJsonResponse({ logged: true }, true, 'Login event logged.');
+
+      case 'logError':
+        logSystemError(payload.module, payload.function, payload.errorMessage, payload.stackTrace, payload.user);
+        return createJsonResponse({ logged: true }, true, 'System error logged.');
 
       case 'subscribeNewsletter':
         var subRes = saveSubscriber(payload.email);
@@ -408,61 +459,132 @@ function doPost(e) {
   'Installer.gs': {
     filename: 'Installer.gs',
     category: 'Core',
-    description: 'Auto-installer & Boot sequence ensuring 30 tabs & headers exist.',
+    description: 'Enterprise zero-config auto installer & self-healing sheet provisioner.',
     code: `/**
- * Installer.gs - Zero-Config Auto Installer & Sheet Provisioner
+ * Installer.gs - Enterprise Zero-Config Auto-Installer & Self-Healing Engine
+ * Automatically creates all 38 required sheets, restores headers, adds missing columns,
+ * freezes header rows, and repairs structure without ever deleting or overwriting user data.
  */
 
 function runZeroConfigBootSequence() {
-  var ss = getActiveSpreadsheet();
   var logs = [];
 
-  for (var tabName in SCHEMAS) {
-    var sheet = ss.getSheetByName(tabName);
-    var expectedHeaders = SCHEMAS[tabName];
+  try {
+    var ss = getActiveSpreadsheet();
+    if (!ss) {
+      logs.push("Errors: Unable to access active Google Spreadsheet instance.");
+      return logs;
+    }
 
-    if (!sheet) {
-      sheet = ss.insertSheet(tabName);
-      sheet.appendRow(expectedHeaders);
-      sheet.getRange(1, 1, 1, expectedHeaders.length)
-        .setFontWeight('bold')
-        .setBackground('#18181b')
-        .setFontColor('#ffffff');
-      sheet.setFrozenRows(1);
-      logs.push("Auto-Installer: Created tab " + tabName);
-    } else {
-      var data = sheet.getDataRange().getValues();
-      var existingHeaders = (data.length > 0) ? data[0] : [];
+    for (var tabName in SCHEMAS) {
+      try {
+        var expectedHeaders = SCHEMAS[tabName];
+        var sheet = ss.getSheetByName(tabName);
 
-      if (existingHeaders.length === 0) {
-        sheet.appendRow(expectedHeaders);
-        sheet.getRange(1, 1, 1, expectedHeaders.length)
-          .setFontWeight('bold')
-          .setBackground('#18181b')
-          .setFontColor('#ffffff');
-        sheet.setFrozenRows(1);
-        logs.push("Self-Healing: Restored headers for " + tabName);
-      } else {
-        for (var h = 0; h < expectedHeaders.length; h++) {
-          var expectedCol = expectedHeaders[h];
-          if (existingHeaders.indexOf(expectedCol) === -1) {
-            var newColIdx = existingHeaders.length + 1;
-            sheet.getRange(1, newColIdx).setValue(expectedCol).setFontWeight('bold').setBackground('#18181b').setFontColor('#ffffff');
-            existingHeaders.push(expectedCol);
-            logs.push("Self-Healing: Added column '" + expectedCol + "' in " + tabName);
+        if (!sheet) {
+          // AUTO CREATE MISSING SHEET
+          sheet = ss.insertSheet(tabName);
+          sheet.getRange(1, 1, 1, expectedHeaders.length).setValues([expectedHeaders]);
+          sheet.getRange(1, 1, 1, expectedHeaders.length)
+            .setFontWeight('bold')
+            .setBackground('#18181b')
+            .setFontColor('#ffffff');
+          sheet.setFrozenRows(1);
+          logs.push("Sheet Created: Created missing sheet '" + tabName + "' with " + expectedHeaders.length + " headers.");
+        } else {
+          // SELF-HEALING: CHECK EXISTING SHEET
+          var lastRow = sheet.getLastRow();
+          var lastCol = sheet.getLastColumn();
+          var data = (lastRow > 0 && lastCol > 0) ? sheet.getRange(1, 1, 1, Math.max(lastCol, expectedHeaders.length)).getValues() : [[]];
+          var existingHeaders = data[0] || [];
+          
+          var hasValidHeaders = false;
+          for (var k = 0; k < existingHeaders.length; k++) {
+            if (existingHeaders[k] && String(existingHeaders[k]).trim() !== '') {
+              hasValidHeaders = true;
+              break;
+            }
+          }
+
+          if (!hasValidHeaders) {
+            // AUTO HEADER CREATION: Header row is empty or missing
+            sheet.getRange(1, 1, 1, expectedHeaders.length).setValues([expectedHeaders]);
+            sheet.getRange(1, 1, 1, expectedHeaders.length)
+              .setFontWeight('bold')
+              .setBackground('#18181b')
+              .setFontColor('#ffffff');
+            sheet.setFrozenRows(1);
+            logs.push("Header Restored: Restored headers for sheet '" + tabName + "'.");
+          } else {
+            // AUTO COLUMN ADDITION & HEADER REPAIR
+            var currentHeaderStrings = [];
+            for (var c = 0; c < existingHeaders.length; c++) {
+              currentHeaderStrings.push(String(existingHeaders[c] || '').trim());
+            }
+
+            var columnsAdded = 0;
+            var headerRepaired = false;
+
+            for (var h = 0; h < expectedHeaders.length; h++) {
+              var expectedCol = expectedHeaders[h];
+              var foundIdx = currentHeaderStrings.indexOf(expectedCol);
+
+              if (foundIdx === -1) {
+                // Column missing -> append to right
+                var newColIdx = currentHeaderStrings.length + 1;
+                sheet.getRange(1, newColIdx)
+                  .setValue(expectedCol)
+                  .setFontWeight('bold')
+                  .setBackground('#18181b')
+                  .setFontColor('#ffffff');
+                currentHeaderStrings.push(expectedCol);
+                columnsAdded++;
+                logs.push("Column Added: Added missing column '" + expectedCol + "' in sheet '" + tabName + "'.");
+              }
+            }
+
+            // Ensure header row is frozen
+            if (sheet.getFrozenRows() < 1) {
+              sheet.setFrozenRows(1);
+              headerRepaired = true;
+            }
+
+            // Ensure header styling is applied
+            sheet.getRange(1, 1, 1, currentHeaderStrings.length)
+              .setFontWeight('bold')
+              .setBackground('#18181b')
+              .setFontColor('#ffffff');
+
+            if (columnsAdded > 0 || headerRepaired) {
+              logs.push("Repair Completed: Repaired headers and structure for sheet '" + tabName + "'.");
+            } else {
+              logs.push("Already Exists: Sheet '" + tabName + "' is healthy and up to date.");
+            }
           }
         }
+      } catch (sheetErr) {
+        logs.push("Errors: Failed to verify/repair sheet '" + tabName + "': " + sheetErr.toString());
       }
     }
+
+    try {
+      seedInitialSettingsIfMissing(ss, logs);
+      seedSuperAdminIfMissing(ss, logs);
+    } catch (seedErr) {
+      logs.push("Errors: Seeding default settings/admin failed: " + seedErr.toString());
+    }
+
+  } catch (err) {
+    logs.push("Errors: Zero-config boot sequence exception: " + err.toString());
   }
 
-  seedInitialSettingsIfMissing(ss, logs);
-  seedSuperAdminIfMissing(ss, logs);
   return logs;
 }
 
 function seedInitialSettingsIfMissing(ss, logs) {
   var settingsSheet = ss.getSheetByName(SHEETS.SETTINGS);
+  if (!settingsSheet) return;
+
   var settingsData = settingsSheet.getDataRange().getValues();
   var settingsMap = {};
   for (var s = 1; s < settingsData.length; s++) {
@@ -494,6 +616,8 @@ function seedInitialSettingsIfMissing(ss, logs) {
 
 function seedSuperAdminIfMissing(ss, logs) {
   var adminSheet = ss.getSheetByName(SHEETS.ADMINS);
+  if (!adminSheet) return;
+
   var adminData = adminSheet.getDataRange().getValues();
   if (adminData.length <= 1) {
     var now = new Date().toISOString();
@@ -699,9 +823,9 @@ function verifyAdminSecretCodeInSheet(email, secretInput, rememberMe) {
   'Authentication.gs': {
     filename: 'Authentication.gs',
     category: 'Auth & Security',
-    description: 'OTP generation, email dispatch, user session creation, and verification.',
+    description: 'OTP generation, OTP_Store persistence, email dispatch, user session creation, and verification.',
     code: `/**
- * Authentication.gs - Email OTP Dispatcher & Customer Session Manager
+ * Authentication.gs - Email OTP Dispatcher & OTP_Store Persistence
  */
 
 function generateAndSendOTP(email, name, customOtp) {
@@ -718,7 +842,7 @@ function generateAndSendOTP(email, name, customOtp) {
     }
   }
 
-  targetEmail = (targetEmail || '').toString().trim();
+  targetEmail = (targetEmail || '').toString().trim().toLowerCase();
 
   if (!targetEmail || targetEmail.indexOf('@') === -1) {
     Logger.log('generateAndSendOTP Error: Invalid or missing email address: "' + targetEmail + '"');
@@ -740,8 +864,55 @@ function generateAndSendOTP(email, name, customOtp) {
     } catch (e) {}
   }
 
-  Logger.log('generateAndSendOTP Dispatched: Recipient="' + targetEmail + '" Name="' + custName + '" OTP="' + otp + '"');
+  var createdAt = new Date().toISOString();
+  var expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+
+  // Write OTP to Google Sheets OTP_Store table immediately
+  try {
+    var ss = getActiveSpreadsheet();
+    var otpSheet = ss.getSheetByName('OTP_Store') || ss.getSheetByName(SHEETS.OTP_STORE);
+    if (!otpSheet) {
+      runZeroConfigBootSequence();
+      otpSheet = ss.getSheetByName('OTP_Store') || ss.getSheetByName(SHEETS.OTP_STORE);
+    }
+
+    if (otpSheet) {
+      var data = otpSheet.getDataRange().getValues();
+      for (var i = 1; i < data.length; i++) {
+        var rowEmail = (data[i][0] || '').toString().trim().toLowerCase();
+        var rowStatus = (data[i][4] || '').toString().trim().toUpperCase();
+        if (rowEmail === targetEmail && rowStatus === 'ACTIVE') {
+          otpSheet.getRange(i + 1, 5).setValue('REPLACED');
+          Logger.log('OTP_Store: Replaced existing ACTIVE OTP for email "' + targetEmail + '" at row ' + (i + 1));
+        }
+      }
+
+      Logger.log('OTP_Store Write Start: Sheet="OTP_Store", Email="' + targetEmail + '", OTP="' + otp + '", Status="ACTIVE"');
+      otpSheet.appendRow([targetEmail, otp, createdAt, expiresAt, 'ACTIVE', '']);
+      var lastRow = otpSheet.getLastRow();
+      Logger.log('OTP_Store Write Success: Sheet="OTP_Store", Row=' + lastRow + ', Email="' + targetEmail + '", OTP="' + otp + '"');
+    }
+  } catch (sheetErr) {
+    Logger.log('OTP_Store Write Exception: ' + sheetErr.toString());
+    logSystemError('Authentication', 'generateAndSendOTP', sheetErr.toString(), '', targetEmail);
+  }
+
+  // Cache in Script Cache as fast backup layer
+  var userCache = CacheService.getScriptCache();
+  userCache.put('OTP_' + targetEmail, otp, 600);
+
+  Logger.log('================== [OTP GENERATION & SAVE LOG] ==================');
+  Logger.log('Generated OTP: ' + otp);
+  Logger.log('Saved OTP: ' + otp);
+  Logger.log('Email: ' + targetEmail);
+  Logger.log('Created At: ' + createdAt);
+  Logger.log('Expires At: ' + expiresAt);
+  Logger.log('Expiry Status: VALID');
+  Logger.log('==================================================================');
+
   var sendResult = sendCustomerOTPEmail(targetEmail, otp, custName);
+
+  logAuditTrail(targetEmail, 'OTP_GENERATED', 'OTP_Store', 'OTP generated and sent to email: ' + targetEmail);
 
   return { 
     success: sendResult && sendResult.success !== false, 
@@ -749,6 +920,93 @@ function generateAndSendOTP(email, name, customOtp) {
     recipient: targetEmail,
     message: sendResult && sendResult.success !== false ? 'Login OTP verification code dispatched to ' + targetEmail : 'OTP generated, but email delivery failed: ' + (sendResult ? sendResult.error : 'Unknown error') 
   };
+}
+
+function verifyCustomerOTP(email, enteredOtp) {
+  var targetEmail = (email || '').toString().trim().toLowerCase();
+  var inputOtp = (enteredOtp || '').toString().trim();
+
+  var ss = getActiveSpreadsheet();
+  var otpSheet = ss.getSheetByName('OTP_Store') || ss.getSheetByName(SHEETS.OTP_STORE);
+  
+  var foundInSheet = false;
+  var storedOtpStr = '';
+  var isExpired = false;
+  var otpRowIndex = -1;
+
+  if (otpSheet) {
+    var data = otpSheet.getDataRange().getValues();
+    for (var i = data.length - 1; i >= 1; i--) {
+      var rowEmail = (data[i][0] || '').toString().trim().toLowerCase();
+      var rowStatus = (data[i][4] || '').toString().trim().toUpperCase();
+      if (rowEmail === targetEmail && rowStatus === 'ACTIVE') {
+        foundInSheet = true;
+        otpRowIndex = i + 1;
+        storedOtpStr = (data[i][1] || '').toString().trim();
+        var rowExpiresAt = data[i][3] ? new Date(data[i][3]).getTime() : 0;
+        if (rowExpiresAt > 0 && rowExpiresAt < Date.now()) {
+          isExpired = true;
+        }
+        break;
+      }
+    }
+  }
+
+  // Fallback to Script Cache if not found in sheet
+  if (!foundInSheet) {
+    var userCache = CacheService.getScriptCache();
+    var cachedOtp = userCache.get('OTP_' + targetEmail);
+    if (cachedOtp) {
+      storedOtpStr = cachedOtp.toString().trim();
+      foundInSheet = true;
+    }
+  }
+
+  var isMatch = storedOtpStr !== '' && storedOtpStr === inputOtp;
+  var expiryStatus = isExpired ? 'EXPIRED' : (storedOtpStr !== '' ? 'VALID' : 'NO_RECORD');
+
+  Logger.log('================== [OTP VERIFICATION LOG] ==================');
+  Logger.log('Email: ' + targetEmail);
+  Logger.log('Entered OTP: ' + inputOtp);
+  Logger.log('Stored OTP: ' + (storedOtpStr || 'NOT_FOUND'));
+  Logger.log('OTP Match Result: ' + isMatch);
+  Logger.log('Expiry Status: ' + expiryStatus);
+  Logger.log('============================================================');
+
+  if (expiryStatus === 'EXPIRED') {
+    if (otpRowIndex > 1 && otpSheet) {
+      otpSheet.getRange(otpRowIndex, 5).setValue('EXPIRED');
+    }
+    logLoginAttempt(targetEmail, 'FAILED', 'Client', 'WebBrowser', 'WebDevice', 'OTP Expired');
+    return { success: false, message: 'OTP expired. Please request a new verification code.' };
+  }
+
+  if (!isMatch) {
+    logLoginAttempt(targetEmail, 'FAILED', 'Client', 'WebBrowser', 'WebDevice', 'Invalid OTP Code');
+    return { success: false, message: 'Invalid OTP code. Please enter the 6-digit verification code sent to your email.' };
+  }
+
+  // Mark OTP row as USED in OTP_Store sheet
+  if (otpRowIndex > 1 && otpSheet) {
+    otpSheet.getRange(otpRowIndex, 5).setValue('USED');
+    otpSheet.getRange(otpRowIndex, 6).setValue(new Date().toISOString());
+    Logger.log('OTP_Store Updated: Set row ' + otpRowIndex + ' Status="USED" for email ' + targetEmail);
+  }
+
+  var userCache = CacheService.getScriptCache();
+  userCache.remove('OTP_' + targetEmail);
+
+  // Save or update customer profile in 03_Users sheet
+  var userRecord = saveOrUpdateCustomer({
+    email: targetEmail,
+    name: targetEmail.split('@')[0],
+    lastLogin: new Date().toISOString()
+  });
+
+  logLoginAttempt(targetEmail, 'SUCCESS', 'Client', 'WebBrowser', 'WebDevice', 'OTP Verified Successfully');
+  logAuditTrail(targetEmail, 'CUSTOMER_LOGIN_SUCCESS', '03_Users', 'Customer logged in via OTP verification.');
+
+  return { success: true, message: 'OTP verified successfully.', email: targetEmail, user: userRecord };
 }
 `
   },
@@ -764,20 +1022,61 @@ function generateAndSendOTP(email, name, customOtp) {
 function saveOrUpdateCustomer(cust) {
   var ss = getActiveSpreadsheet();
   var sheet = ss.getSheetByName(SHEETS.USERS);
-  var custId = cust.id || generateUniqueId('USR');
+  if (!sheet) {
+    runZeroConfigBootSequence();
+    sheet = ss.getSheetByName(SHEETS.USERS);
+  }
 
-  sheet.appendRow([
-    custId,
-    cust.name || '',
-    cust.email || '',
-    cust.phone || '',
-    'customer',
-    'active',
-    JSON.stringify(cust.addresses || []),
-    new Date().toISOString()
-  ]);
+  var normEmail = (cust.email || '').toString().trim().toLowerCase();
+  var now = new Date().toISOString();
 
-  return custId;
+  if (!normEmail) {
+    Logger.log('saveOrUpdateCustomer Error: missing email address.');
+    return null;
+  }
+
+  Logger.log('03_Users Operation Start: Email="' + normEmail + '"');
+  var existingUser = findRowInSheet(SHEETS.USERS, 'Email', normEmail);
+
+  if (existingUser) {
+    var rowIdx = existingUser._rowIndex;
+    var loginCount = parseInt(existingUser.LoginCount || 0, 10) + 1;
+    updateRowInSheet(SHEETS.USERS, rowIdx, {
+      Name: cust.name || existingUser.Name || normEmail.split('@')[0],
+      Phone: cust.phone || existingUser.Phone || '',
+      Addresses: JSON.stringify(cust.addresses || (existingUser.Addresses ? JSON.parse(existingUser.Addresses) : [])),
+      UpdatedAt: now,
+      LastLogin: cust.lastLogin || now,
+      LoginCount: loginCount,
+      Device: cust.device || 'Web',
+      Browser: cust.browser || 'Browser'
+    });
+    Logger.log('03_Users Write Success: Updated row ' + rowIdx + ' for email "' + normEmail + '"');
+    logAuditTrail(normEmail, 'UPDATE_CUSTOMER', SHEETS.USERS, 'Customer profile updated.');
+    return { id: existingUser.ID, email: normEmail, name: cust.name || existingUser.Name, role: existingUser.Role || 'customer' };
+  } else {
+    var custId = cust.id || generateUniqueId('USR');
+    sheet.appendRow([
+      custId,
+      cust.name || normEmail.split('@')[0],
+      normEmail,
+      cust.phone || '',
+      cust.passwordHash || '',
+      cust.role || 'customer',
+      cust.status || 'active',
+      JSON.stringify(cust.addresses || []),
+      now,
+      now,
+      now,
+      1,
+      cust.device || 'Web',
+      cust.browser || 'Browser'
+    ]);
+    var newRowIdx = sheet.getLastRow();
+    Logger.log('03_Users Write Success: Created row ' + newRowIdx + ' ID=' + custId + ' for email "' + normEmail + '"');
+    logAuditTrail(normEmail, 'REGISTER_CUSTOMER', SHEETS.USERS, 'New customer registered in Users sheet.');
+    return { id: custId, email: normEmail, name: cust.name || normEmail.split('@')[0], role: cust.role || 'customer' };
+  }
 }
 `
   },
@@ -989,28 +1288,73 @@ function saveOrderToSheet(order) {
   }
 
   var orderId = order.id || ('ORD-' + new Date().toISOString().replace(/\\D/g, '').substring(0, 8) + '-' + Math.floor(1000 + Math.random() * 9000));
+  var now = new Date().toISOString();
   
+  Logger.log('09_Orders Write Start: OrderID=' + orderId);
   sheet.appendRow([
     orderId,
-    order.customerId || 'GUEST',
-    order.customerName || '',
-    order.customerEmail || '',
-    order.customerPhone || '',
+    order.customerId || order.userId || 'GUEST',
+    order.customerName || order.name || '',
+    order.customerEmail || order.email || '',
+    order.customerPhone || order.phone || '',
     JSON.stringify(order.shippingAddress || {}),
     order.subtotal || 0,
     order.discount || 0,
     order.couponCode || '',
-    order.deliveryFee || 0,
+    order.deliveryFee || order.shippingCharge || 0,
     order.total || 0,
     order.paymentMethod || 'COD',
     order.paymentStatus || 'pending',
     order.orderStatus || 'pending',
     order.trackingNumber || '',
     order.courierPartner || 'Pathao',
-    new Date().toISOString(),
+    now,
     order.notes || ''
   ]);
+  var orderRowIdx = sheet.getLastRow();
+  Logger.log('09_Orders Write Success: OrderID=' + orderId + ' Row=' + orderRowIdx);
 
+  // Save item level breakdown to 10_OrderItems sheet
+  try {
+    var itemsSheet = ss.getSheetByName(SHEETS.ORDER_ITEMS);
+    if (!itemsSheet) {
+      runZeroConfigBootSequence();
+      itemsSheet = ss.getSheetByName(SHEETS.ORDER_ITEMS);
+    }
+    if (itemsSheet) {
+      var itemsList = [];
+      if (typeof order.items === 'string') {
+        try { itemsList = JSON.parse(order.items); } catch(e){}
+      } else if (Array.isArray(order.items)) {
+        itemsList = order.items;
+      }
+
+      for (var i = 0; i < itemsList.length; i++) {
+        var it = itemsList[i];
+        var itemQty = it.quantity || it.qty || 1;
+        var itemPrice = it.price || 0;
+        var itemSubtotal = itemPrice * itemQty;
+        itemsSheet.appendRow([
+          generateUniqueId('ORI'),
+          orderId,
+          it.productId || it.id || '',
+          it.name || it.productName || 'ROYMEN Item',
+          it.sku || '',
+          it.color || it.variantColor || '',
+          it.size || it.variantSize || '',
+          itemPrice,
+          itemQty,
+          itemSubtotal,
+          it.image || ''
+        ]);
+      }
+      Logger.log('10_OrderItems Write Success: OrderID=' + orderId + ' ItemsCount=' + itemsList.length);
+    }
+  } catch (itemsErr) {
+    Logger.log('10_OrderItems Write Error: ' + itemsErr.toString());
+  }
+
+  logAuditTrail(order.customerEmail || 'CUSTOMER', 'PLACE_ORDER', SHEETS.ORDERS, 'Order created: ' + orderId);
   return orderId;
 }
 `
@@ -1027,16 +1371,25 @@ function saveOrderToSheet(order) {
 function saveCartItem(item) {
   var ss = getActiveSpreadsheet();
   var sheet = ss.getSheetByName(SHEETS.CART);
+  if (!sheet) {
+    runZeroConfigBootSequence();
+    sheet = ss.getSheetByName(SHEETS.CART);
+  }
   var cartId = item.id || generateUniqueId('CRT');
+  var now = new Date().toISOString();
 
+  Logger.log('17_Cart Write Start: UserID="' + (item.userId || 'GUEST') + '" ProductID="' + item.productId + '"');
   sheet.appendRow([
     cartId,
-    item.userId || 'GUEST',
+    item.userId || item.email || 'GUEST',
     item.productId,
-    item.color || '',
-    item.size || '',
-    item.quantity || 1
+    item.color || item.variantColor || '',
+    item.size || item.variantSize || '',
+    item.quantity || 1,
+    now
   ]);
+  var lastRow = sheet.getLastRow();
+  Logger.log('17_Cart Write Success: CartID=' + cartId + ' Row=' + lastRow);
   return cartId;
 }
 `
@@ -1053,14 +1406,22 @@ function saveCartItem(item) {
 function saveWishlistItem(userId, productId) {
   var ss = getActiveSpreadsheet();
   var sheet = ss.getSheetByName(SHEETS.WISHLIST);
+  if (!sheet) {
+    runZeroConfigBootSequence();
+    sheet = ss.getSheetByName(SHEETS.WISHLIST);
+  }
   var wishId = generateUniqueId('WSH');
+  var now = new Date().toISOString();
 
+  Logger.log('16_Wishlist Write Start: UserID="' + userId + '" ProductID="' + productId + '"');
   sheet.appendRow([
     wishId,
-    userId,
+    userId || 'GUEST',
     productId,
-    new Date().toISOString()
+    now
   ]);
+  var lastRow = sheet.getLastRow();
+  Logger.log('16_Wishlist Write Success: WishlistID=' + wishId + ' Row=' + lastRow);
   return wishId;
 }
 `
@@ -1076,7 +1437,7 @@ function saveWishlistItem(userId, productId) {
 
 function validateCouponCode(code, spendAmount) {
   var coupons = getSheetDataAsJson(SHEETS.COUPONS);
-  var normCode = code.trim().toUpperCase();
+  var normCode = (code || '').trim().toUpperCase();
 
   for (var c = 0; c < coupons.length; c++) {
     var cpn = coupons[c];
@@ -1104,8 +1465,14 @@ function validateCouponCode(code, spendAmount) {
 function saveReview(rev) {
   var ss = getActiveSpreadsheet();
   var sheet = ss.getSheetByName(SHEETS.REVIEWS);
+  if (!sheet) {
+    runZeroConfigBootSequence();
+    sheet = ss.getSheetByName(SHEETS.REVIEWS);
+  }
   var revId = generateUniqueId('REV');
+  var now = new Date().toISOString();
 
+  Logger.log('12_Reviews Write Start: ProductID=' + rev.productId);
   sheet.appendRow([
     revId,
     rev.productId,
@@ -1113,10 +1480,75 @@ function saveReview(rev) {
     rev.rating || 5,
     rev.comment || '',
     rev.verifiedBuyer ? 'true' : 'false',
-    new Date().toISOString(),
+    now,
     'approved'
   ]);
+  var lastRow = sheet.getLastRow();
+  Logger.log('12_Reviews Write Success: ReviewID=' + revId + ' Row=' + lastRow);
   return revId;
+}
+`
+  },
+
+  'Newsletter.gs': {
+    filename: 'Newsletter.gs',
+    category: 'Catalog & Sales',
+    description: 'Newsletter email subscription persistence.',
+    code: `/**
+ * Newsletter.gs - Newsletter Email Subscriber Logger
+ */
+
+function saveSubscriber(email) {
+  var normEmail = (email || '').toString().trim().toLowerCase();
+  if (!normEmail || normEmail.indexOf('@') === -1) return { success: false, message: 'Invalid email' };
+  var ss = getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('18_Newsletter') || ss.getSheetByName(SHEETS.NEWSLETTER);
+  if (!sheet) {
+    runZeroConfigBootSequence();
+    sheet = ss.getSheetByName('18_Newsletter') || ss.getSheetByName(SHEETS.NEWSLETTER);
+  }
+  var subId = generateUniqueId('NWS');
+  var now = new Date().toISOString();
+  Logger.log('18_Newsletter Write Start: Email="' + normEmail + '"');
+  sheet.appendRow([subId, normEmail, now, 'active']);
+  var lastRow = sheet.getLastRow();
+  Logger.log('18_Newsletter Write Success: Email="' + normEmail + '" Row=' + lastRow);
+  return { id: subId, email: normEmail, subscribedAt: now, status: 'active' };
+}
+`
+  },
+
+  'Contacts.gs': {
+    filename: 'Contacts.gs',
+    category: 'Catalog & Sales',
+    description: 'Customer contact form message persistence.',
+    code: `/**
+ * Contacts.gs - Contact Message Inquiry Recorder
+ */
+
+function saveContactMessage(cnt) {
+  var ss = getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('19_Contacts') || ss.getSheetByName(SHEETS.CONTACTS);
+  if (!sheet) {
+    runZeroConfigBootSequence();
+    sheet = ss.getSheetByName('19_Contacts') || ss.getSheetByName(SHEETS.CONTACTS);
+  }
+  var cntId = cnt.id || generateUniqueId('CNT');
+  var now = new Date().toISOString();
+  Logger.log('19_Contacts Write Start: Name="' + (cnt.name || '') + '" Email="' + (cnt.email || '') + '"');
+  sheet.appendRow([
+    cntId,
+    cnt.name || '',
+    cnt.email || '',
+    cnt.phone || '',
+    cnt.subject || '',
+    cnt.message || '',
+    cnt.status || 'unread',
+    now
+  ]);
+  var lastRow = sheet.getLastRow();
+  Logger.log('19_Contacts Write Success: ContactID=' + cntId + ' Row=' + lastRow);
+  return { id: cntId, status: 'unread', createdAt: now };
 }
 `
   },
@@ -1627,23 +2059,83 @@ function sendAdminNewOrderNotification(order) {
   'Logger.gs': {
     filename: 'Logger.gs',
     category: 'System & Utilities',
-    description: 'Audit log trail recorder for administrative action compliance.',
+    description: 'Audit log trail, login event recorder, and system error logger.',
     code: `/**
- * Logger.gs - Audit Trail & System Event Logger
+ * Logger.gs - Audit Trail, Login Log, and System Error Logger
  */
 
 function logAuditTrail(user, action, moduleName, details) {
-  var ss = getActiveSpreadsheet();
-  var sheet = ss.getSheetByName(SHEETS.AUDIT_LOG);
-  if (sheet) {
-    sheet.appendRow([
-      generateUniqueId('AUD'),
-      user,
-      action,
-      moduleName,
-      new Date().toISOString(),
-      details
-    ]);
+  try {
+    var ss = getActiveSpreadsheet();
+    var sheet = ss.getSheetByName(SHEETS.AUDIT_LOG);
+    if (!sheet) {
+      runZeroConfigBootSequence();
+      sheet = ss.getSheetByName(SHEETS.AUDIT_LOG);
+    }
+    if (sheet) {
+      sheet.appendRow([
+        generateUniqueId('AUD'),
+        user || 'ANONYMOUS',
+        action || 'ACTION',
+        moduleName || 'GENERAL',
+        new Date().toISOString(),
+        details || ''
+      ]);
+      Logger.log('Audit_Log Write Success: Action="' + action + '", User="' + user + '"');
+    }
+  } catch (e) {
+    Logger.log('Audit_Log Write Error: ' + e.toString());
+  }
+}
+
+function logLoginAttempt(email, status, ip, browser, device, reason) {
+  try {
+    var ss = getActiveSpreadsheet();
+    var sheet = ss.getSheetByName('Login_Log') || ss.getSheetByName(SHEETS.LOGIN_LOG);
+    if (!sheet) {
+      runZeroConfigBootSequence();
+      sheet = ss.getSheetByName('Login_Log') || ss.getSheetByName(SHEETS.LOGIN_LOG);
+    }
+    if (sheet) {
+      sheet.appendRow([
+        generateUniqueId('LGN'),
+        email || 'ANONYMOUS',
+        new Date().toISOString(),
+        status || 'UNKNOWN',
+        ip || '127.0.0.1',
+        browser || 'Browser',
+        device || 'Device',
+        reason || ''
+      ]);
+      Logger.log('Login_Log Write Success: Email="' + email + '", Status="' + status + '"');
+    }
+  } catch (err) {
+    Logger.log('Login_Log Write Error: ' + err.toString());
+  }
+}
+
+function logSystemError(moduleName, functionName, errorMessage, stackTrace, user) {
+  try {
+    var ss = getActiveSpreadsheet();
+    var sheet = ss.getSheetByName('System_Error_Log') || ss.getSheetByName(SHEETS.SYSTEM_ERROR_LOG);
+    if (!sheet) {
+      runZeroConfigBootSequence();
+      sheet = ss.getSheetByName('System_Error_Log') || ss.getSheetByName(SHEETS.SYSTEM_ERROR_LOG);
+    }
+    if (sheet) {
+      sheet.appendRow([
+        generateUniqueId('ERR'),
+        new Date().toISOString(),
+        moduleName || 'General',
+        functionName || 'Unknown',
+        errorMessage || '',
+        stackTrace || '',
+        user || 'System'
+      ]);
+      Logger.log('System_Error_Log Write Success: Module="' + moduleName + '", Error="' + errorMessage + '"');
+    }
+  } catch (err) {
+    Logger.log('System_Error_Log Write Error: ' + err.toString());
   }
 }
 `

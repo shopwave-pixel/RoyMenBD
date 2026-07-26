@@ -326,15 +326,26 @@ export class StorageService {
       };
     }
 
+    // Generate ONE 6-digit OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiry = Date.now() + 10 * 60 * 1000; // 10 minutes
+    const createdAt = new Date().toISOString();
+    const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes expiry
 
-    // Store secure pending OTP locally for verification matching
-    const otpData = { email: normEmail, otp, expiry };
+    // Save that OTP immediately with email, createdAt, and expiresAt
+    const otpData = { email: normEmail, otp, createdAt, expiresAt, used: false };
     localStorage.setItem('roymen_pending_otp_' + normEmail, JSON.stringify(otpData));
 
-    // Dispatch request to Google Apps Script backend to send email directly to the customer's recipient address
-    this.triggerGoogleSheetSync('sendOTP', { email: normEmail, name: normEmail.split('@')[0] })
+    console.log('[OTP GENERATED]', {
+      generatedOTP: otp,
+      savedOTP: otp,
+      email: normEmail,
+      createdAt: createdAt,
+      expiresAt: new Date(expiresAt).toISOString(),
+      expiryStatus: 'VALID'
+    });
+
+    // Dispatch request to Google Apps Script backend to send email with the exact generated OTP
+    this.triggerGoogleSheetSync('sendOTP', { email: normEmail, name: normEmail.split('@')[0], otp: otp })
       .catch(err => console.error('GAS OTP dispatch error:', err));
 
     return {
@@ -345,23 +356,72 @@ export class StorageService {
 
   static verifyOTP(email: string, otp: string): { success: boolean; user?: User; message: string } {
     const normEmail = email.trim().toLowerCase();
+    const enteredOtp = (otp || '').toString().trim();
     const pendingKey = 'roymen_pending_otp_' + normEmail;
     const stored = localStorage.getItem(pendingKey);
 
-    if (stored) {
-      try {
-        const parsed = JSON.parse(stored);
-        if (parsed.expiry < Date.now()) {
-          return { success: false, message: 'OTP code has expired. Please click "Change Email Address" to request a new code.' };
-        }
-        if (parsed.otp !== otp.trim()) {
-          return { success: false, message: 'Invalid OTP code. Please enter the 6-digit verification code sent to your email.' };
-        }
-        localStorage.removeItem(pendingKey);
-      } catch (e) {
-        // Fallback
-      }
+    if (!stored) {
+      console.log('[OTP VERIFY RESULT]', {
+        email: normEmail,
+        enteredOTP: enteredOtp,
+        storedOTP: 'NOT_FOUND',
+        otpMatchResult: false,
+        expiryStatus: 'NO_RECORD'
+      });
+      return {
+        success: false,
+        message: 'Invalid OTP code. Please request a new verification code.'
+      };
     }
+
+    let parsed: any = null;
+    try {
+      parsed = JSON.parse(stored);
+    } catch (e) {
+      console.error('Failed to parse stored OTP JSON:', e);
+    }
+
+    if (!parsed || !parsed.otp) {
+      return {
+        success: false,
+        message: 'Invalid OTP code. Please request a new verification code.'
+      };
+    }
+
+    const storedOtp = (parsed.otp || '').toString().trim();
+    const expiresAt = parsed.expiresAt || parsed.expiry || 0;
+    const now = Date.now();
+    const isExpired = expiresAt < now;
+    const isMatch = storedOtp === enteredOtp;
+
+    const expiryStatus = isExpired ? 'EXPIRED' : 'VALID';
+
+    console.log('[OTP VERIFY LOG]', {
+      generatedOTP: storedOtp,
+      savedOTP: storedOtp,
+      email: normEmail,
+      enteredOTP: enteredOtp,
+      storedOTP: storedOtp,
+      otpMatchResult: isMatch,
+      expiryStatus: expiryStatus
+    });
+
+    if (isExpired) {
+      return {
+        success: false,
+        message: 'OTP expired. Please click "Change Email Address" to request a new verification code.'
+      };
+    }
+
+    if (!isMatch) {
+      return {
+        success: false,
+        message: 'Invalid OTP code. Please enter the 6-digit verification code sent to your email.'
+      };
+    }
+
+    // Mark OTP as used and remove from pending storage
+    localStorage.removeItem(pendingKey);
 
     const users = this.getUsers();
     let user = users.find(u => u.email.toLowerCase() === normEmail);
