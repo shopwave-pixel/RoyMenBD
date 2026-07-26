@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Mail, ShieldCheck, KeyRound, ArrowRight, Lock, Key, AlertCircle } from 'lucide-react';
+import { X, Mail, ShieldCheck, KeyRound, ArrowRight, Lock, Key, AlertCircle, Sparkles } from 'lucide-react';
 import { StorageService } from '../../services/storageService';
 import { User } from '../../types';
 
@@ -59,9 +59,26 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthSuc
           setErrorMessage(otpRes.message);
           return;
         }
+        if (otpRes.message) setInfoMessage(otpRes.message);
         setStep('otp');
       }
     }, 500);
+  };
+
+  const handleResendOTP = () => {
+    if (!email.trim()) return;
+    setLoading(true);
+    setErrorMessage('');
+    setInfoMessage('');
+    setTimeout(() => {
+      const otpRes = StorageService.sendOTP(email.trim());
+      setLoading(false);
+      if (!otpRes.success) {
+        setErrorMessage(otpRes.message);
+      } else {
+        setInfoMessage(otpRes.message || `A fresh OTP code has been sent to ${email.trim()}`);
+      }
+    }, 400);
   };
 
   const handleVerifyOTP = (e: React.FormEvent) => {
@@ -152,6 +169,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthSuc
             {step === 'admin_secret_code' && 'Step 2 of 2: Enter administrator 6-digit Secret Code.'}
           </p>
         </div>
+
+        {infoMessage && (
+          <div className="mb-4 p-3 bg-blue-950/60 border border-blue-800/80 rounded-xl text-blue-200 text-xs flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-blue-400 shrink-0" />
+            <span className="leading-relaxed">{infoMessage}</span>
+          </div>
+        )}
 
         {noticeMessage && (
           <div className="mb-4 p-3.5 bg-amber-500/10 border border-amber-500/30 rounded-2xl text-amber-200 text-xs flex items-center gap-2.5 shadow-sm">
@@ -246,13 +270,24 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthSuc
               {loading ? 'Verifying...' : 'Verify & Enter ROYMEN'}
             </button>
 
-            <button
-              type="button"
-              onClick={() => handleResetModal()}
-              className="w-full text-center text-xs text-zinc-400 hover:text-white"
-            >
-              ← Change Email Address
-            </button>
+            <div className="flex items-center justify-between pt-1">
+              <button
+                type="button"
+                onClick={handleResendOTP}
+                disabled={loading}
+                className="text-xs text-amber-400 hover:underline font-semibold"
+              >
+                Resend OTP Code
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleResetModal()}
+                className="text-xs text-zinc-400 hover:text-white"
+              >
+                ← Change Email
+              </button>
+            </div>
           </form>
         )}
 

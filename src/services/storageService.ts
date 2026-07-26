@@ -317,7 +317,7 @@ export class StorageService {
     };
   }
 
-  static sendOTP(email: string): { success: boolean; message: string } {
+  static sendOTP(email: string): { success: boolean; message: string; otp?: string } {
     const normEmail = email.trim().toLowerCase();
     if (!normEmail || !normEmail.includes('@')) {
       return {
@@ -344,13 +344,31 @@ export class StorageService {
       expiryStatus: 'VALID'
     });
 
-    // Dispatch request to Google Apps Script backend to send email with the exact generated OTP
-    this.triggerGoogleSheetSync('sendOTP', { email: normEmail, name: normEmail.split('@')[0], otp: otp })
-      .catch(err => console.error('GAS OTP dispatch error:', err));
+    const settings = this.getSettings();
+    const webAppUrl = settings.googleWebAppUrl || APP_CONFIG.API_URL;
+
+    if (webAppUrl) {
+      // 1. Dispatch POST request to Google Apps Script WebApp (text/plain avoids preflight CORS checks)
+      fetch(webAppUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({
+          action: 'sendOTP',
+          payload: { email: normEmail, name: normEmail.split('@')[0], otp: otp }
+        })
+      }).catch(err => console.error('GAS OTP POST dispatch error:', err));
+
+      // 2. Fallback GET ping in case POST is blocked by cross-origin redirects
+      const getUrl = `${webAppUrl}${webAppUrl.includes('?') ? '&' : '?'}action=sendOTP&email=${encodeURIComponent(normEmail)}&otp=${encodeURIComponent(otp)}&name=${encodeURIComponent(normEmail.split('@')[0])}`;
+      fetch(getUrl, { method: 'GET', mode: 'no-cors' }).catch(err => console.log('GAS OTP GET ping error:', err));
+    }
 
     return {
       success: true,
-      message: `An OTP verification code has been dispatched to ${normEmail}. Please check your inbox.`
+      otp: otp,
+      message: webAppUrl
+        ? `An OTP verification code has been dispatched to ${normEmail} via ROYMEN Concierge Mailer.`
+        : `Verification code generated for ${normEmail}. (Note: To receive actual emails, configure your Google Apps Script WebApp URL in Settings)`
     };
   }
 
@@ -723,6 +741,7 @@ export class StorageService {
       });
       setStored(KEYS.NEWSLETTER, subs);
     }
+    this.triggerGoogleSheetSync('subscribeNewsletter', { email });
     return true;
   }
 
@@ -736,6 +755,7 @@ export class StorageService {
     };
     contacts.unshift(newContact);
     setStored(KEYS.CONTACTS, contacts);
+    this.triggerGoogleSheetSync('submitContact', newContact);
     return newContact;
   }
 
@@ -800,25 +820,32 @@ export class StorageService {
     };
   }
 
-  // --- Google Sheets WebHook Sync Simulation ---
+  // --- Google Sheets WebHook Sync Controller ---
   static async triggerGoogleSheetSync(action: string, payload: any): Promise<{ success: boolean; message: string }> {
     const settings = this.getSettings();
-    if (!settings.googleWebAppUrl) {
+    const webAppUrl = settings.googleWebAppUrl || APP_CONFIG.API_URL;
+    if (!webAppUrl) {
       return { success: false, message: 'No Google Sheets WebApp URL configured.' };
     }
 
     try {
-      // Background ping attempt to Google Apps Script Web App
-      fetch(settings.googleWebAppUrl, {
+      // 1. Dispatch POST request with text/plain (prevents browser CORS preflight OPTIONS blocking)
+      fetch(webAppUrl, {
         method: 'POST',
-        mode: 'no-cors',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify({ action, payload, timestamp: new Date().toISOString() })
-      }).catch(err => console.log('GAS sync ping background:', err));
+      }).catch(err => console.log('GAS sync ping POST background error:', err));
+
+      // 2. Dispatch GET fallback ping with encoded JSON payload to guarantee execution if POST redirects are blocked
+      if (payload && typeof payload === 'object') {
+        const payloadStr = JSON.stringify(payload);
+        const getUrl = `${webAppUrl}${webAppUrl.includes('?') ? '&' : '?'}action=${encodeURIComponent(action)}&payload=${encodeURIComponent(payloadStr)}`;
+        fetch(getUrl, { method: 'GET', mode: 'no-cors' }).catch(err => console.log('GAS sync ping GET background error:', err));
+      }
 
       return {
         success: true,
-        message: 'Order data dispatched to Google Sheets WebApp.'
+        message: 'Data dispatched to Google Sheets WebApp.'
       };
     } catch (err) {
       return { success: false, message: 'Google Sheets sync failed.' };

@@ -317,6 +317,58 @@ function doGet(e) {
         responseData = getSheetDataAsJson('Email_Log') || getSheetDataAsJson(SHEETS.EMAIL_LOG);
         break;
 
+      case 'sendOTP':
+      case 'send_otp':
+      case 'generateAndSendOTP':
+        var gEmail = payload.email || payload.Email || payload.recipient || (e && e.parameter && (e.parameter.email || e.parameter.Email || e.parameter.recipient)) || '';
+        var gName = payload.name || payload.Name || (e && e.parameter && e.parameter.name) || '';
+        var gOtp = payload.otp || payload.OTP || (e && e.parameter && e.parameter.otp) || '';
+        var otpResGet = generateAndSendOTP(gEmail, gName, gOtp);
+        return createJsonResponse(otpResGet, otpResGet.success, otpResGet.message);
+
+      case 'verifyOTP':
+      case 'verify_otp':
+        var gvEmail = payload.email || payload.Email || (e && e.parameter && (e.parameter.email || e.parameter.Email)) || '';
+        var gvOtp = payload.otp || payload.OTP || payload.code || (e && e.parameter && (e.parameter.otp || e.parameter.code)) || '';
+        var vResGet = verifyCustomerOTP(gvEmail, gvOtp);
+        return createJsonResponse(vResGet, vResGet.success, vResGet.message);
+
+      case 'placeOrder':
+      case 'POST_ORDER':
+        var custEmailGet = (payload.customerEmail || payload.email || payload.Email || '').toString().trim();
+        if (!custEmailGet || custEmailGet.indexOf('@') === -1) {
+          return createErrorResponse('401 Unauthorized: Mandatory customer authentication is required before placing an order.');
+        }
+        var orderIdGet = saveOrderToSheet(payload);
+        payload.id = orderIdGet;
+        sendCustomerOrderConfirmation(payload);
+        sendAdminNewOrderNotification(payload);
+        return createJsonResponse({ orderId: orderIdGet }, true, 'Order saved to sheet successfully.');
+
+      case 'subscribeNewsletter':
+      case 'saveSubscriber':
+        var subResGet = saveSubscriber(payload.email || payload.subscriberEmail || (e && e.parameter && e.parameter.email) || '');
+        return createJsonResponse(subResGet, subResGet.success !== false, 'Subscriber logged to sheet.');
+
+      case 'saveContactMessage':
+      case 'submitContact':
+        var cntResGet = saveContactMessage(payload);
+        return createJsonResponse(cntResGet, true, 'Contact message saved to sheet.');
+
+      case 'registerCustomer':
+      case 'saveCustomer':
+      case 'updateProfile':
+        var custResGet = saveOrUpdateCustomer(payload);
+        return createJsonResponse({ customer: custResGet }, true, 'Customer saved to sheet.');
+
+      case 'updateProduct':
+        var prdIdGet = saveOrUpdateProduct(payload);
+        return createJsonResponse({ productId: prdIdGet }, true, 'Product saved to sheet.');
+
+      case 'submitReview':
+        var revResGet = saveReview(payload);
+        return createJsonResponse({ reviewId: revResGet }, true, 'Review saved to sheet.');
+
       case 'health':
       case 'health_check':
         return createJsonResponse(runFullHealthCheck(), true, 'System Health Diagnostic Complete');
@@ -337,6 +389,26 @@ function doGet(e) {
   }
 }
 
+function sendCustomerOrderConfirmation(order) {
+  try {
+    if (typeof sendCustomerOrderConfirmationEmail === 'function') {
+      return sendCustomerOrderConfirmationEmail(order);
+    }
+  } catch(e) {
+    Logger.log('sendCustomerOrderConfirmation error: ' + e.toString());
+  }
+}
+
+function sendAdminNewOrderNotification(order) {
+  try {
+    if (typeof sendAdminNewOrderAlertEmail === 'function') {
+      return sendAdminNewOrderAlertEmail(order);
+    }
+  } catch(e) {
+    Logger.log('sendAdminNewOrderNotification error: ' + e.toString());
+  }
+}
+
 function doPost(e) {
   var lock = LockService.getScriptLock();
   lock.tryLock(15000);
@@ -346,7 +418,11 @@ function doPost(e) {
 
     var postData = {};
     if (e && e.postData && e.postData.contents) {
-      postData = JSON.parse(e.postData.contents);
+      try {
+        postData = JSON.parse(e.postData.contents);
+      } catch (pErr) {
+        postData = e.parameter || {};
+      }
     } else if (e && e.parameter) {
       postData = e.parameter;
     }
@@ -1719,11 +1795,12 @@ function queueAndSendEmail(recipient, category, subject, htmlBody) {
     return { success: false, status: 'FAILED', error: errMsg };
   }
 
-  // Prevent Duplicate Emails (check if same recipient and subject logged in the last 60 seconds)
+  // Prevent Duplicate Emails (EXCEPT for transactional OTPs where re-sends must always go out)
+  var isOtpEmail = (category && category.indexOf('OTP') !== -1) || (subject && (subject.indexOf('Verification') !== -1 || subject.indexOf('OTP') !== -1));
   var lowerRecipient = normRecipient.toLowerCase();
   var nowIso = new Date().toISOString();
   
-  if (sheet) {
+  if (!isOtpEmail && sheet) {
     var logs = sheet.getDataRange().getValues();
     if (logs.length > 1) {
       var recentCutoff = Date.now() - 60000;
@@ -1748,27 +1825,40 @@ function queueAndSendEmail(recipient, category, subject, htmlBody) {
   var errorMessage = '';
 
   try {
-    // Attempt dispatch via GmailApp / MailApp
+    // Attempt primary dispatch via GmailApp
     if (typeof GmailApp !== 'undefined' && GmailApp.sendEmail) {
       GmailApp.sendEmail(normRecipient, subject, 'Please view this email in an HTML compatible mail client.', {
         htmlBody: htmlBody,
         name: 'ROYMEN Concierge'
       });
+      status = 'SENT';
+      sentTime = nowIso;
+      Logger.log('GmailApp email successfully sent to: ' + normRecipient + ' [' + subject + ']');
     } else {
       MailApp.sendEmail(normRecipient, subject, 'Please view this email in an HTML compatible mail client.', {
         htmlBody: htmlBody,
         name: 'ROYMEN Concierge'
       });
+      status = 'SENT';
+      sentTime = nowIso;
+      Logger.log('MailApp email successfully sent to: ' + normRecipient + ' [' + subject + ']');
     }
-
-    status = 'SENT';
-    sentTime = nowIso;
-    Logger.log('Email successfully sent to: ' + normRecipient + ' [' + subject + ']');
-  } catch (err) {
-    status = 'FAILED';
-    errorMessage = err.toString();
-    retryCount = 1;
-    Logger.log('Email Send Failure to ' + normRecipient + ': ' + errorMessage);
+  } catch (primaryErr) {
+    Logger.log('Primary email dispatch failed (' + primaryErr.toString() + '), attempting MailApp fallback...');
+    try {
+      MailApp.sendEmail(normRecipient, subject, 'Please view this email in an HTML compatible mail client.', {
+        htmlBody: htmlBody,
+        name: 'ROYMEN Concierge'
+      });
+      status = 'SENT';
+      sentTime = nowIso;
+      Logger.log('MailApp fallback email successfully sent to: ' + normRecipient + ' [' + subject + ']');
+    } catch (fallbackErr) {
+      status = 'FAILED';
+      errorMessage = 'Primary: ' + primaryErr.toString() + ' | Fallback: ' + fallbackErr.toString();
+      retryCount = 1;
+      Logger.log('Email Send Failure to ' + normRecipient + ': ' + errorMessage);
+    }
   }
 
   // Record in Email_Log
