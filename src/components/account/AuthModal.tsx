@@ -14,7 +14,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthSuc
   const [step, setStep] = useState<'email' | 'otp' | 'admin_password' | 'admin_secret_code'>('email');
   const [email, setEmail] = useState('');
   const [otpInput, setOtpInput] = useState('');
-  const [demoOtp, setDemoOtp] = useState('');
   const [passwordInput, setPasswordInput] = useState('');
   const [secretCodeInput, setSecretCodeInput] = useState('');
   const [rememberMe, setRememberMe] = useState(true);
@@ -55,8 +54,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthSuc
         setInfoMessage('Administrator Account Detected. Please enter password.');
       } else {
         // Customer or New Customer
-        const res = StorageService.sendOTP(email.trim());
-        setDemoOtp(res.otp);
+        StorageService.sendOTP(email.trim());
         setStep('otp');
       }
     }, 500);
@@ -64,11 +62,19 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthSuc
 
   const handleVerifyOTP = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!otpInput.trim()) return;
+
     setLoading(true);
     setErrorMessage('');
     setTimeout(() => {
       const res = StorageService.verifyOTP(email.trim(), otpInput.trim());
       setLoading(false);
+
+      if (!res.success || !res.user) {
+        setErrorMessage(res.message || 'Invalid OTP code.');
+        return;
+      }
+
       onAuthSuccess(res.user);
       onClose();
     }, 600);
@@ -203,12 +209,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthSuc
         {/* STEP 2: CUSTOMER OTP VERIFICATION */}
         {step === 'otp' && (
           <form onSubmit={handleVerifyOTP} className="space-y-4">
-            {demoOtp && (
-              <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-center">
-                <span className="text-[11px] text-amber-300 font-mono block">DEMO SIMULATED OTP CODE:</span>
-                <strong className="text-xl font-mono text-white tracking-widest">{demoOtp}</strong>
-              </div>
-            )}
+            <div className="p-3 bg-zinc-900 border border-zinc-800 rounded-2xl text-center space-y-1">
+              <span className="text-xs text-zinc-300 block">
+                An OTP verification code has been dispatched to <strong className="text-amber-400 font-mono">{email}</strong>.
+              </span>
+              <span className="text-[11px] text-zinc-500 block">Please check your email inbox and enter the 6-digit code below.</span>
+            </div>
 
             <div>
               <label className="text-xs font-bold uppercase tracking-wider text-zinc-400 block mb-1">

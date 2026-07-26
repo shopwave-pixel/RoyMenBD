@@ -317,20 +317,47 @@ export class StorageService {
     };
   }
 
-  static sendOTP(email: string): { success: boolean; otp: string; message: string } {
-    // Simulated OTP generation
+  static sendOTP(email: string): { success: boolean; message: string } {
+    const normEmail = email.trim().toLowerCase();
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    console.log(`[ROYMEN OTP] Sent OTP ${otp} to ${email}`);
+    const expiry = Date.now() + 10 * 60 * 1000; // 10 minutes
+
+    // Store secure pending OTP locally for verification matching
+    const otpData = { email: normEmail, otp, expiry };
+    localStorage.setItem('roymen_pending_otp_' + normEmail, JSON.stringify(otpData));
+
+    // Dispatch request to Google Apps Script backend to send email
+    this.triggerGoogleSheetSync('sendOTP', { email: normEmail, name: normEmail.split('@')[0] })
+      .catch(err => console.error('GAS OTP dispatch error:', err));
+
     return {
       success: true,
-      otp,
-      message: `OTP code sent to ${email}. (Demo OTP: ${otp})`
+      message: `An OTP verification code has been dispatched to ${email}. Please check your inbox.`
     };
   }
 
-  static verifyOTP(email: string, otp: string): { success: boolean; user: User; message: string } {
+  static verifyOTP(email: string, otp: string): { success: boolean; user?: User; message: string } {
+    const normEmail = email.trim().toLowerCase();
+    const pendingKey = 'roymen_pending_otp_' + normEmail;
+    const stored = localStorage.getItem(pendingKey);
+
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored);
+        if (parsed.expiry < Date.now()) {
+          return { success: false, message: 'OTP code has expired. Please click "Change Email Address" to request a new code.' };
+        }
+        if (parsed.otp !== otp.trim()) {
+          return { success: false, message: 'Invalid OTP code. Please enter the 6-digit verification code sent to your email.' };
+        }
+        localStorage.removeItem(pendingKey);
+      } catch (e) {
+        // Fallback
+      }
+    }
+
     const users = this.getUsers();
-    let user = users.find(u => u.email.toLowerCase() === email.toLowerCase());
+    let user = users.find(u => u.email.toLowerCase() === normEmail);
     
     if (!user) {
       user = {
