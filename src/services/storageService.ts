@@ -349,20 +349,24 @@ export class StorageService {
     const webAppUrl = settings.googleWebAppUrl || APP_CONFIG.API_URL;
 
     if (webAppUrl) {
-      // 1. Dispatch POST request to Google Apps Script WebApp with mode: 'no-cors' to avoid cross-origin redirect NetworkError
+      const payloadObj = {
+        action: 'sendOTP',
+        email: normEmail,
+        name: normEmail.split('@')[0],
+        otp: otp,
+        payload: { email: normEmail, name: normEmail.split('@')[0], otp: otp }
+      };
+
+      // 1. Dispatch POST request to Google Apps Script WebApp without mode: 'no-cors' to preserve body payload
       fetch(webAppUrl, {
         method: 'POST',
-        mode: 'no-cors',
-        headers: { 'Content-Type': 'text/plain' },
-        body: JSON.stringify({
-          action: 'sendOTP',
-          payload: { email: normEmail, name: normEmail.split('@')[0], otp: otp }
-        })
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(payloadObj)
       }).catch(err => console.log('GAS OTP POST dispatch info:', err));
 
-      // 2. Fallback GET ping in case POST is blocked by cross-origin redirects
+      // 2. Fallback GET ping with explicit query parameters
       const getUrl = `${webAppUrl}${webAppUrl.includes('?') ? '&' : '?'}action=sendOTP&email=${encodeURIComponent(normEmail)}&otp=${encodeURIComponent(otp)}&name=${encodeURIComponent(normEmail.split('@')[0])}`;
-      fetch(getUrl, { method: 'GET', mode: 'no-cors' }).catch(err => console.log('GAS OTP GET ping error:', err));
+      fetch(getUrl, { method: 'GET' }).catch(err => console.log('GAS OTP GET ping error:', err));
     }
 
     return {
@@ -910,19 +914,18 @@ export class StorageService {
     }
 
     try {
-      // 1. Dispatch POST request with mode: 'no-cors' (prevents browser CORS preflight / redirect NetworkError)
+      // 1. Dispatch POST request
       fetch(webAppUrl, {
         method: 'POST',
-        mode: 'no-cors',
-        headers: { 'Content-Type': 'text/plain' },
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify({ action, payload, timestamp: new Date().toISOString() })
       }).catch(err => console.log('GAS sync ping POST background error:', err));
 
-      // 2. Dispatch GET fallback ping with encoded JSON payload to guarantee execution if POST redirects are blocked
+      // 2. Dispatch GET fallback ping with encoded JSON payload
       if (payload && typeof payload === 'object') {
         const payloadStr = JSON.stringify(payload);
         const getUrl = `${webAppUrl}${webAppUrl.includes('?') ? '&' : '?'}action=${encodeURIComponent(action)}&payload=${encodeURIComponent(payloadStr)}`;
-        fetch(getUrl, { method: 'GET', mode: 'no-cors' }).catch(err => console.log('GAS sync ping GET background error:', err));
+        fetch(getUrl, { method: 'GET' }).catch(err => console.log('GAS sync ping GET background error:', err));
       }
 
       return {

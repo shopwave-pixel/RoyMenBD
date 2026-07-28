@@ -289,7 +289,19 @@ function doGet(e) {
 
   try {
     var healReport = runZeroConfigBootSequence();
-    var action = (e && e.parameter && e.parameter.action) ? e.parameter.action : 'init';
+    var params = (e && e.parameter) ? e.parameter : {};
+    var action = params.action || 'init';
+
+    var rawPayload = params.payload;
+    var payload = {};
+    if (rawPayload) {
+      if (typeof rawPayload === 'string') {
+        try { payload = JSON.parse(rawPayload); } catch(pErr) { payload = {}; }
+      } else if (typeof rawPayload === 'object') {
+        payload = rawPayload;
+      }
+    }
+
     var responseData = {};
 
     switch (action) {
@@ -338,22 +350,40 @@ function doGet(e) {
       case 'sendOTP':
       case 'send_otp':
       case 'generateAndSendOTP':
-        var gEmail = payload.email || payload.Email || payload.recipient || (e && e.parameter && (e.parameter.email || e.parameter.Email || e.parameter.recipient)) || '';
-        var gName = payload.name || payload.Name || (e && e.parameter && e.parameter.name) || '';
-        var gOtp = payload.otp || payload.OTP || (e && e.parameter && e.parameter.otp) || '';
+        var gEmail = (payload && (payload.email || payload.Email || payload.recipient || payload.customerEmail || payload.userEmail)) || params.email || params.Email || params.recipient || params.customerEmail || params.userEmail || '';
+        var gName = (payload && (payload.name || payload.Name || payload.customerName)) || params.name || params.Name || params.customerName || '';
+        var gOtp = (payload && (payload.otp || payload.OTP)) || params.otp || params.OTP || '';
+
+        Logger.log('================== [ENTERPRISE REST API GET OTP REQUEST] ==================');
+        Logger.log('ACTION: ' + action);
+        Logger.log('QUERY PARAMS: ' + JSON.stringify(params));
+        Logger.log('EXTRACTED EMAIL: "' + gEmail + '"');
+        Logger.log('EXTRACTED NAME: "' + gName + '"');
+        Logger.log('EXTRACTED OTP: "' + gOtp + '"');
+        Logger.log('===========================================================================');
+
+        if (!gEmail || gEmail.indexOf('@') === -1) {
+          return createJsonResponse({
+            success: false,
+            error: 'Email missing in query parameters or invalid email format',
+            receivedQueryParams: params,
+            receivedPayload: payload
+          }, false, 'Email missing in GET request.');
+        }
+
         var otpResGet = generateAndSendOTP(gEmail, gName, gOtp);
         return createJsonResponse(otpResGet, otpResGet.success, otpResGet.message);
 
       case 'verifyOTP':
       case 'verify_otp':
-        var gvEmail = payload.email || payload.Email || (e && e.parameter && (e.parameter.email || e.parameter.Email)) || '';
-        var gvOtp = payload.otp || payload.OTP || payload.code || (e && e.parameter && (e.parameter.otp || e.parameter.code)) || '';
+        var gvEmail = (payload && (payload.email || payload.Email)) || params.email || params.Email || '';
+        var gvOtp = (payload && (payload.otp || payload.OTP || payload.code)) || params.otp || params.OTP || params.code || '';
         var vResGet = verifyCustomerOTP(gvEmail, gvOtp);
         return createJsonResponse(vResGet, vResGet.success, vResGet.message);
 
       case 'placeOrder':
       case 'POST_ORDER':
-        var custEmailGet = (payload.customerEmail || payload.email || payload.Email || '').toString().trim();
+        var custEmailGet = ((payload && (payload.customerEmail || payload.email || payload.Email)) || params.customerEmail || params.email || params.Email || '').toString().trim();
         if (!custEmailGet || custEmailGet.indexOf('@') === -1) {
           return createErrorResponse('401 Unauthorized: Mandatory customer authentication is required before placing an order.');
         }
@@ -365,7 +395,7 @@ function doGet(e) {
 
       case 'subscribeNewsletter':
       case 'saveSubscriber':
-        var subResGet = saveSubscriber(payload.email || payload.subscriberEmail || (e && e.parameter && e.parameter.email) || '');
+        var subResGet = saveSubscriber((payload && (payload.email || payload.subscriberEmail)) || params.email || params.subscriberEmail || '');
         return createJsonResponse(subResGet, subResGet.success !== false, 'Subscriber logged to sheet.');
 
       case 'saveContactMessage':
@@ -422,14 +452,19 @@ function doPost(e) {
       try {
         postData = JSON.parse(e.postData.contents);
       } catch (pErr) {
-        postData = e.parameter || {};
+        postData = (e && e.parameter) ? e.parameter : {};
       }
     } else if (e && e.parameter) {
       postData = e.parameter;
     }
 
-    var action = postData.action || 'ping';
-    var payload = postData.payload || postData;
+    var action = postData.action || (e && e.parameter && e.parameter.action) || 'ping';
+    var rawPayload = postData.payload;
+    var payload = (rawPayload && typeof rawPayload === 'object') ? rawPayload : postData;
+
+    var email = payload.email || payload.Email || payload.customerEmail || payload.userEmail || postData.email || postData.Email || (e && e.parameter && (e.parameter.email || e.parameter.Email)) || '';
+    var name = payload.name || payload.Name || payload.customerName || postData.name || (e && e.parameter && e.parameter.name) || '';
+    var otp = payload.otp || payload.OTP || postData.otp || (e && e.parameter && e.parameter.otp) || '';
 
     switch (action) {
       case 'UPDATE_INVOICE':
@@ -456,26 +491,46 @@ function doPost(e) {
         }
         return createJsonResponse({ updated: true }, true, 'Invoice update recorded.');
       case 'checkEmailType':
-        return createJsonResponse(checkUserOrAdminEmail(payload.email), true, 'Email classification complete.');
+        return createJsonResponse(checkUserOrAdminEmail(payload.email || email), true, 'Email classification complete.');
 
       case 'verifyAdminPassword':
-        var pwRes = verifyAdminPasswordInSheet(payload.email, payload.password);
+        var pwRes = verifyAdminPasswordInSheet(payload.email || email, payload.password);
         return createJsonResponse(pwRes, pwRes.success, pwRes.message);
 
       case 'verifyAdminSecretCode':
-        var secRes = verifyAdminSecretCodeInSheet(payload.email, payload.secretCode, payload.rememberMe);
+        var secRes = verifyAdminSecretCodeInSheet(payload.email || email, payload.secretCode, payload.rememberMe);
         return createJsonResponse(secRes, secRes.success, secRes.message);
 
       case 'sendOTP':
-        var targetEmail = payload.email || payload.Email || payload.customerEmail || payload.userEmail || postData.email || postData.Email || '';
-        var targetName = payload.name || payload.Name || payload.customerName || postData.name || '';
-        var targetOtp = payload.otp || payload.OTP || postData.otp || '';
-        var otpRes = generateAndSendOTP(targetEmail, targetName, targetOtp);
+      case 'send_otp':
+      case 'generateAndSendOTP':
+        Logger.log('================== [ENTERPRISE REST API POST OTP REQUEST] ==================');
+        Logger.log('RAW POST CONTENTS: ' + (e && e.postData ? e.postData.contents : 'NONE'));
+        Logger.log('PARSED POST DATA: ' + JSON.stringify(postData));
+        Logger.log('ACTION: ' + action);
+        Logger.log('PAYLOAD: ' + JSON.stringify(payload));
+        Logger.log('EXTRACTED EMAIL: "' + email + '"');
+        Logger.log('EXTRACTED NAME: "' + name + '"');
+        Logger.log('EXTRACTED OTP: "' + otp + '"');
+        Logger.log('=============================================================================');
+
+        if (!email || email.indexOf('@') === -1) {
+          return createJsonResponse({
+            success: false,
+            error: 'Email missing in request body or invalid email format',
+            receivedPostData: postData,
+            receivedPayload: payload,
+            receivedParameters: (e && e.parameter) ? e.parameter : {}
+          }, false, 'Email missing in request body.');
+        }
+
+        var otpRes = generateAndSendOTP(email, name, otp);
         return createJsonResponse(otpRes, otpRes.success, otpRes.message);
 
       case 'verifyOTP':
-        var vEmail = payload.email || payload.Email || postData.email || '';
-        var vOtp = payload.otp || payload.OTP || postData.otp || '';
+      case 'verify_otp':
+        var vEmail = payload.email || payload.Email || postData.email || email || '';
+        var vOtp = payload.otp || payload.OTP || postData.otp || otp || '';
         var vRes = verifyCustomerOTP(vEmail, vOtp);
         return createJsonResponse(vRes, vRes.success, vRes.message);
 
@@ -1088,9 +1143,22 @@ function generateAndSendOTP(email, name, customOtp) {
 
   targetEmail = (targetEmail || '').toString().trim().toLowerCase();
 
+  Logger.log('================== [ENTERPRISE generateAndSendOTP EXECUTION] ==================');
+  Logger.log('TARGET EMAIL: "' + targetEmail + '"');
+  Logger.log('TARGET NAME: "' + (name || 'Valued Customer') + '"');
+  Logger.log('CUSTOM OTP PROVIDED: "' + (customOtp || 'NONE') + '"');
+
   if (!targetEmail || targetEmail.indexOf('@') === -1) {
-    Logger.log('generateAndSendOTP Error: Invalid or missing email address: "' + targetEmail + '"');
-    return { success: false, message: 'Invalid or missing recipient email address.' };
+    var errMessage = 'Invalid or missing recipient email address: "' + targetEmail + '"';
+    Logger.log('generateAndSendOTP Error: ' + errMessage);
+    return {
+      success: false,
+      error: 'Email missing in request body or invalid email format',
+      receivedEmail: email,
+      receivedName: name,
+      receivedOtp: customOtp,
+      message: errMessage
+    };
   }
 
   var otp = (customOtp || '').toString().trim();
