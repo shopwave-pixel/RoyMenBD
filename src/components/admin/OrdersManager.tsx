@@ -36,17 +36,17 @@ export const OrdersManager: React.FC = () => {
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <span className="text-xs font-bold uppercase tracking-widest text-amber-400">Sheet 07_Orders & 08_Order_Items</span>
-          <h1 className="text-2xl font-black font-serif text-white">Order Dispatch & Courier Management</h1>
+          <h1 className="text-3xl md:text-2xl font-black font-serif text-white">Order Dispatch & Courier Management</h1>
         </div>
 
         {/* Filter Status */}
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2 w-full sm:w-auto">
           {['all', 'pending', 'processing', 'shipped', 'delivered', 'cancelled'].map(s => (
             <button
               key={s}
               onClick={() => setFilterStatus(s)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold uppercase transition-colors ${
-                filterStatus === s ? 'bg-amber-500 text-black' : 'bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white'
+              className={`min-h-[44px] px-3 py-1.5 rounded-xl text-xs font-bold uppercase transition-colors flex-1 sm:flex-initial flex items-center justify-center ${
+                filterStatus === s ? 'bg-amber-500 text-black font-black' : 'bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white'
               }`}
             >
               {s}
@@ -55,9 +55,10 @@ export const OrdersManager: React.FC = () => {
         </div>
       </div>
 
-      {/* Orders Table */}
+      {/* Orders Container: Desktop Table vs Mobile Cards */}
       <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
-        <div className="overflow-x-auto">
+        {/* Desktop Table View */}
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-xs text-left text-zinc-300">
             <thead>
               <tr className="border-b border-zinc-800 bg-zinc-950 text-zinc-400 uppercase tracking-wider">
@@ -87,7 +88,7 @@ export const OrdersManager: React.FC = () => {
                     <select
                       value={ord.orderStatus}
                       onChange={e => handleUpdateStatus(ord.id, e.target.value as OrderStatus, ord.courierPartner, ord.trackingNumber)}
-                      className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1 text-xs text-amber-300 font-bold uppercase focus:outline-none"
+                      className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1 text-xs text-amber-300 font-bold uppercase focus:outline-none cursor-pointer"
                     >
                       <option value="pending">Pending</option>
                       <option value="processing">Processing</option>
@@ -100,7 +101,7 @@ export const OrdersManager: React.FC = () => {
                     <select
                       value={ord.courierPartner || 'Pathao'}
                       onChange={e => handleUpdateStatus(ord.id, ord.orderStatus, e.target.value as CourierPartner, ord.trackingNumber || `PTH-BD-${Math.floor(100000 + Math.random() * 900000)}`)}
-                      className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1 text-xs text-emerald-400 font-bold focus:outline-none"
+                      className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1 text-xs text-emerald-400 font-bold focus:outline-none cursor-pointer"
                     >
                       <option value="Pathao">Pathao Express</option>
                       <option value="Steadfast">Steadfast Courier</option>
@@ -128,6 +129,84 @@ export const OrdersManager: React.FC = () => {
               ))}
             </tbody>
           </table>
+        </div>
+
+        {/* Mobile Responsive Order Cards View */}
+        <div className="block md:hidden p-4 space-y-4">
+          {filteredOrders.map(ord => (
+            <div key={ord.id} className="p-4 bg-zinc-950 border border-zinc-800 rounded-xl space-y-3">
+              {/* Order Top Bar */}
+              <div className="flex justify-between items-center border-b border-zinc-800/80 pb-2.5">
+                <div>
+                  <span className="font-mono font-bold text-amber-300 text-base">{ord.id}</span>
+                  <span className="text-xs text-zinc-400 block">{ord.shippingAddress?.district || 'Dhaka'}</span>
+                </div>
+                <span className="bg-zinc-800 px-2.5 py-1 rounded-lg text-xs font-bold text-zinc-200">
+                  {ord.paymentMethod}
+                </span>
+              </div>
+
+              {/* Client Info & Total */}
+              <div className="flex justify-between items-center text-sm">
+                <div>
+                  <span className="text-zinc-400 text-xs block uppercase">Customer</span>
+                  <span className="font-bold text-white">{ord.customerName}</span>
+                </div>
+                <div className="text-right">
+                  <span className="text-zinc-400 text-xs block uppercase">Total BDT</span>
+                  <span className="font-bold text-amber-400 font-mono text-base">৳{ord.total.toLocaleString()}</span>
+                </div>
+              </div>
+
+              {/* Controls & Dropdowns */}
+              <div className="grid grid-cols-2 gap-2 pt-1">
+                <div>
+                  <label className="text-[10px] font-bold text-zinc-500 uppercase block mb-1">Status</label>
+                  <select
+                    value={ord.orderStatus}
+                    onChange={e => handleUpdateStatus(ord.id, e.target.value as OrderStatus, ord.courierPartner, ord.trackingNumber)}
+                    className="w-full min-h-[44px] bg-zinc-900 border border-zinc-800 rounded-xl px-2 py-2 text-xs text-amber-300 font-bold uppercase focus:outline-none"
+                  >
+                    <option value="pending">Pending</option>
+                    <option value="processing">Processing</option>
+                    <option value="shipped">Shipped</option>
+                    <option value="delivered">Delivered</option>
+                    <option value="cancelled">Cancelled</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold text-zinc-500 uppercase block mb-1">Courier</label>
+                  <select
+                    value={ord.courierPartner || 'Pathao'}
+                    onChange={e => handleUpdateStatus(ord.id, ord.orderStatus, e.target.value as CourierPartner, ord.trackingNumber || `PTH-BD-${Math.floor(100000 + Math.random() * 900000)}`)}
+                    className="w-full min-h-[44px] bg-zinc-900 border border-zinc-800 rounded-xl px-2 py-2 text-xs text-emerald-400 font-bold focus:outline-none"
+                  >
+                    <option value="Pathao">Pathao Express</option>
+                    <option value="Steadfast">Steadfast Courier</option>
+                    <option value="RedX">RedX Logistics</option>
+                    <option value="Paperfly">Paperfly</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="grid grid-cols-2 gap-2 pt-2 border-t border-zinc-800/80">
+                <button
+                  onClick={() => setSelectedPaymentOrder(ord)}
+                  className="min-h-[44px] w-full bg-zinc-800 hover:bg-amber-500 hover:text-black border border-zinc-700 text-amber-300 rounded-xl transition-colors flex items-center justify-center gap-2 text-xs font-bold uppercase"
+                >
+                  <CreditCard className="w-4 h-4" /> Payment
+                </button>
+                <button
+                  onClick={() => setSelectedOrder(ord)}
+                  className="min-h-[44px] w-full bg-zinc-800 hover:bg-zinc-700 text-white rounded-xl transition-colors flex items-center justify-center gap-2 text-xs font-bold uppercase"
+                >
+                  <Eye className="w-4 h-4" /> Invoice Details
+                </button>
+              </div>
+            </div>
+          ))}
         </div>
       </div>
 

@@ -117,7 +117,7 @@ export const ProductsManager: React.FC = () => {
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <span className="text-xs font-bold uppercase tracking-widest text-amber-400">Sheet 03_Products</span>
-          <h1 className="text-2xl font-black font-serif text-white">Product Catalog Management</h1>
+          <h1 className="text-3xl md:text-2xl font-black font-serif text-white">Product Catalog Management</h1>
         </div>
 
         <button
@@ -136,7 +136,7 @@ export const ProductsManager: React.FC = () => {
             shortDescription: '',
             status: 'active'
           })}
-          className="bg-amber-500 hover:bg-amber-400 text-black font-black px-4 py-2.5 rounded-xl text-xs uppercase tracking-wider flex items-center gap-2 shadow-lg"
+          className="min-h-[44px] w-full sm:w-auto bg-amber-500 hover:bg-amber-400 text-black font-black px-4 py-2.5 rounded-xl text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg cursor-pointer transition-colors"
         >
           <Plus className="w-4 h-4" /> Add New Product
         </button>
@@ -456,9 +456,10 @@ export const ProductsManager: React.FC = () => {
         </div>
       )}
 
-      {/* Table */}
+      {/* Products Container: Desktop Table vs Mobile Cards */}
       <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
-        <div className="overflow-x-auto">
+        {/* Desktop Table View */}
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-xs text-left text-zinc-300">
             <thead>
               <tr className="border-b border-zinc-800 bg-zinc-950 text-zinc-400 uppercase tracking-wider">
@@ -508,6 +509,52 @@ export const ProductsManager: React.FC = () => {
               ))}
             </tbody>
           </table>
+        </div>
+
+        {/* Mobile Product Cards View */}
+        <div className="block md:hidden p-4 space-y-3">
+          {filtered.map(p => (
+            <div key={p.id} className="p-4 bg-zinc-950 border border-zinc-800 rounded-xl space-y-3">
+              <div className="flex gap-3">
+                <img src={p.images[0]} alt="" referrerPolicy="no-referrer" className="w-16 h-20 object-cover rounded-xl border border-zinc-800 shrink-0" />
+                <div className="flex-1 min-w-0 space-y-1">
+                  <h4 className="font-bold text-white text-sm line-clamp-2">{p.name}</h4>
+                  <span className="text-xs text-amber-400 font-bold uppercase block">{p.brand}</span>
+                  <span className="text-xs text-zinc-400 font-mono block">SKU: {p.sku}</span>
+                </div>
+              </div>
+
+              <div className="flex justify-between items-center text-xs pt-2 border-t border-zinc-800/80">
+                <div>
+                  <span className="text-zinc-500 uppercase block text-[10px]">Price</span>
+                  <span className="font-bold text-white text-sm font-mono">৳{(p.discountPrice || p.price).toLocaleString()}</span>
+                </div>
+                <div>
+                  <span className="text-zinc-500 uppercase block text-[10px]">Stock Level</span>
+                  <span className={`px-2.5 py-1 rounded-lg text-xs font-bold ${
+                    p.stock <= p.lowStockAlert ? 'bg-red-950 text-red-300 border border-red-800' : 'bg-zinc-800 text-zinc-200'
+                  }`}>
+                    {p.stock} units
+                  </span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 pt-1">
+                <button
+                  onClick={() => setEditingProduct(p)}
+                  className="min-h-[44px] bg-zinc-800 hover:bg-zinc-700 text-white rounded-xl transition-colors flex items-center justify-center gap-2 text-xs font-bold uppercase"
+                >
+                  <Edit2 className="w-4 h-4" /> Edit
+                </button>
+                <button
+                  onClick={() => handleDelete(p.id)}
+                  className="min-h-[44px] bg-red-950 hover:bg-red-900 text-red-300 border border-red-800/60 rounded-xl transition-colors flex items-center justify-center gap-2 text-xs font-bold uppercase"
+                >
+                  <Trash2 className="w-4 h-4" /> Delete
+                </button>
+              </div>
+            </div>
+          ))}
         </div>
       </div>
     </div>
