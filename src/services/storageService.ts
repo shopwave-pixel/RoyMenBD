@@ -18,7 +18,8 @@ import {
   ApiKey,
   CartItem,
   WishlistItem,
-  AnalyticsSummary
+  AnalyticsSummary,
+  InvoiceEditLog
 } from '../types';
 import {
   initialSettings,
@@ -348,15 +349,16 @@ export class StorageService {
     const webAppUrl = settings.googleWebAppUrl || APP_CONFIG.API_URL;
 
     if (webAppUrl) {
-      // 1. Dispatch POST request to Google Apps Script WebApp (text/plain avoids preflight CORS checks)
+      // 1. Dispatch POST request to Google Apps Script WebApp with mode: 'no-cors' to avoid cross-origin redirect NetworkError
       fetch(webAppUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        mode: 'no-cors',
+        headers: { 'Content-Type': 'text/plain' },
         body: JSON.stringify({
           action: 'sendOTP',
           payload: { email: normEmail, name: normEmail.split('@')[0], otp: otp }
         })
-      }).catch(err => console.error('GAS OTP POST dispatch error:', err));
+      }).catch(err => console.log('GAS OTP POST dispatch info:', err));
 
       // 2. Fallback GET ping in case POST is blocked by cross-origin redirects
       const getUrl = `${webAppUrl}${webAppUrl.includes('?') ? '&' : '?'}action=sendOTP&email=${encodeURIComponent(normEmail)}&otp=${encodeURIComponent(otp)}&name=${encodeURIComponent(normEmail.split('@')[0])}`;
@@ -635,6 +637,85 @@ export class StorageService {
     throw new Error('Order not found');
   }
 
+  static updateOrderInvoice(
+    orderId: string,
+    updates: {
+      paymentMethod: Order['paymentMethod'];
+      paymentStatus: Order['paymentStatus'];
+      deliveryFee: number;
+      discount: number;
+      total: number;
+      deliveryFeePaid: number;
+    },
+    adminEmail = 'admin@roymen.com.bd',
+    adminName = 'ROYMEN Executive Admin'
+  ): Order {
+    const orders = this.getOrders();
+    const idx = orders.findIndex(o => o.id === orderId);
+    if (idx !== -1) {
+      const oldOrder = orders[idx];
+      const editedFields: string[] = [];
+      const oldValues: Record<string, any> = {};
+      const newValues: Record<string, any> = {};
+
+      const fieldsToCheck = ['paymentMethod', 'paymentStatus', 'deliveryFee', 'discount', 'total', 'deliveryFeePaid'] as const;
+      fieldsToCheck.forEach(field => {
+        const oldVal = (oldOrder as any)[field];
+        const newVal = updates[field];
+        if (newVal !== undefined && newVal !== oldVal) {
+          editedFields.push(field);
+          oldValues[field] = oldVal ?? null;
+          newValues[field] = newVal;
+        }
+      });
+
+      const updatedOrder: Order = {
+        ...oldOrder,
+        paymentMethod: updates.paymentMethod,
+        paymentStatus: updates.paymentStatus,
+        deliveryFee: updates.deliveryFee,
+        discount: updates.discount,
+        total: updates.total,
+        deliveryFeePaid: updates.deliveryFeePaid
+      };
+
+      orders[idx] = updatedOrder;
+      setStored(KEYS.ORDERS, orders);
+
+      // Save into Invoice_Edit_Log
+      const logs = getStored<InvoiceEditLog[]>('roymen_invoice_edit_logs', []);
+      const newLog: InvoiceEditLog = {
+        id: `iel-${Date.now()}`,
+        orderId,
+        adminName,
+        adminEmail,
+        editedFields,
+        oldValues,
+        newValues,
+        timestamp: new Date().toISOString()
+      };
+      logs.unshift(newLog);
+      setStored('roymen_invoice_edit_logs', logs);
+
+      this.addAuditLog(
+        adminEmail,
+        'EDIT_INVOICE',
+        'Invoice_Edit_Log',
+        `Edited invoice for order #${orderId}. Fields changed: ${editedFields.join(', ')}`
+      );
+
+      // Sync with Google Sheets
+      this.triggerGoogleSheetSync('UPDATE_INVOICE', { order: updatedOrder, editLog: newLog });
+
+      return updatedOrder;
+    }
+    throw new Error('Order not found');
+  }
+
+  static getInvoiceEditLogs(): InvoiceEditLog[] {
+    return getStored<InvoiceEditLog[]>('roymen_invoice_edit_logs', []);
+  }
+
   // --- 09 Coupons ---
   static getCoupons(): Coupon[] {
     return getStored<Coupon[]>(KEYS.COUPONS, initialCoupons);
@@ -829,10 +910,11 @@ export class StorageService {
     }
 
     try {
-      // 1. Dispatch POST request with text/plain (prevents browser CORS preflight OPTIONS blocking)
+      // 1. Dispatch POST request with mode: 'no-cors' (prevents browser CORS preflight / redirect NetworkError)
       fetch(webAppUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        mode: 'no-cors',
+        headers: { 'Content-Type': 'text/plain' },
         body: JSON.stringify({ action, payload, timestamp: new Date().toISOString() })
       }).catch(err => console.log('GAS sync ping POST background error:', err));
 

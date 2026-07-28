@@ -115,7 +115,7 @@ export interface AdminAccount {
 }
 
 export type PaymentMethod = 'COD' | 'bKash' | 'Nagad' | 'SSLCommerz';
-export type PaymentStatus = 'pending' | 'paid' | 'failed' | 'refunded';
+export type PaymentStatus = 'pending' | 'paid' | 'partially_paid' | 'partially paid' | 'failed' | 'refunded';
 export type OrderStatus = 'pending' | 'processing' | 'shipped' | 'delivered' | 'cancelled';
 export type CourierPartner = 'Pathao' | 'Steadfast' | 'RedX' | 'Paperfly';
 
@@ -145,6 +145,7 @@ export interface Order {
   discount: number;
   couponCode?: string;
   deliveryFee: number;
+  deliveryFeePaid?: number;
   total: number;
   paymentMethod: PaymentMethod;
   paymentStatus: PaymentStatus;
@@ -153,6 +154,17 @@ export interface Order {
   courierPartner?: CourierPartner;
   createdAt: string;
   notes?: string;
+}
+
+export interface InvoiceEditLog {
+  id: string;
+  orderId: string;
+  adminName: string;
+  adminEmail: string;
+  editedFields: string[];
+  oldValues: Record<string, any>;
+  newValues: Record<string, any>;
+  timestamp: string;
 }
 
 export interface Coupon {

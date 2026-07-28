@@ -179,7 +179,7 @@ export default function App() {
 
   // If Admin View is active
   if (currentView === 'admin') {
-    if (currentUser && currentUser.role === 'admin') {
+    if (currentUser && (currentUser.role === 'admin' || currentUser.role === 'super_admin' || (currentUser.role as string).toLowerCase().includes('admin'))) {
       return (
         <AdminLayout
           activeTab={adminActiveTab}
@@ -530,6 +530,14 @@ export default function App() {
               setCurrentView('home');
             }}
             onOpenShop={() => setCurrentView('shop')}
+            onOpenAdmin={() => {
+              if (currentUser && (currentUser.role === 'admin' || currentUser.role === 'super_admin' || (currentUser.role as string).toLowerCase().includes('admin'))) {
+                setCurrentView('admin');
+              } else {
+                setAuthNoticeMessage('Administrator privileges required.');
+                setIsAuthOpen(true);
+              }
+            }}
           />
         )}
 

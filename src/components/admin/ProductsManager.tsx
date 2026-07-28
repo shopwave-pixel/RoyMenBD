@@ -1,12 +1,21 @@
-import React, { useState } from 'react';
-import { Plus, Edit2, Trash2, Save, X, Image as ImageIcon, Sparkles, Search } from 'lucide-react';
+import React, { useState, useRef } from 'react';
+import { Plus, Edit2, Trash2, Save, X, Image as ImageIcon, Sparkles, Search, UploadCloud, Star, CheckCircle2, AlertCircle, RefreshCw } from 'lucide-react';
 import { StorageService } from '../../services/storageService';
+import { CloudinaryService } from '../../services/cloudinaryService';
 import { Product, ProductColor } from '../../types';
 
 export const ProductsManager: React.FC = () => {
   const [products, setProducts] = useState<Product[]>(() => StorageService.getProducts());
   const [editingProduct, setEditingProduct] = useState<Partial<Product> | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Cloudinary upload state
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadSuccessMsg, setUploadSuccessMsg] = useState('');
+  const [uploadErrorMsg, setUploadErrorMsg] = useState('');
+  const [isDragging, setIsDragging] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const categories = StorageService.getCategories();
   const brands = StorageService.getBrands();
@@ -16,9 +25,18 @@ export const ProductsManager: React.FC = () => {
     e.preventDefault();
     if (!editingProduct) return;
 
-    const saved = StorageService.saveProduct(editingProduct);
+    // Ensure at least 1 image exists
+    const finalImages = (editingProduct.images && editingProduct.images.length > 0)
+      ? editingProduct.images
+      : ['https://images.unsplash.com/photo-1594938298603-c8148c4dae35?q=80&w=1000&auto=format&fit=crop'];
+
+    const saved = StorageService.saveProduct({
+      ...editingProduct,
+      images: finalImages
+    });
     setProducts(StorageService.getProducts());
     setEditingProduct(null);
+    resetUploadState();
   };
 
   const handleDelete = (id: string) => {
@@ -26,6 +44,64 @@ export const ProductsManager: React.FC = () => {
       StorageService.deleteProduct(id);
       setProducts(StorageService.getProducts());
     }
+  };
+
+  const resetUploadState = () => {
+    setIsUploading(false);
+    setUploadProgress(0);
+    setUploadSuccessMsg('');
+    setUploadErrorMsg('');
+  };
+
+  const handleProcessImageUpload = async (file: File) => {
+    resetUploadState();
+    setIsUploading(true);
+
+    try {
+      const result = await CloudinaryService.uploadImage(file, (progress) => {
+        setUploadProgress(progress);
+      });
+
+      const currentImages = editingProduct?.images ? [...editingProduct.images] : [];
+      // Append Cloudinary secure URL
+      const updatedImages = [...currentImages, result.secure_url];
+
+      setEditingProduct(prev => prev ? { ...prev, images: updatedImages } : null);
+      setUploadSuccessMsg(`Image uploaded to Cloudinary successfully! (${result.public_id})`);
+    } catch (err: any) {
+      console.error('Cloudinary upload error:', err);
+      setUploadErrorMsg(err.message || 'Failed to upload image to Cloudinary.');
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      handleProcessImageUpload(e.target.files[0]);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDragging(false);
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      handleProcessImageUpload(e.dataTransfer.files[0]);
+    }
+  };
+
+  const handleRemoveImage = (indexToRemove: number) => {
+    if (!editingProduct?.images) return;
+    const updated = editingProduct.images.filter((_, idx) => idx !== indexToRemove);
+    setEditingProduct({ ...editingProduct, images: updated });
+  };
+
+  const handleSetFeaturedImage = (indexToFeature: number) => {
+    if (!editingProduct?.images) return;
+    const images = [...editingProduct.images];
+    const [featured] = images.splice(indexToFeature, 1);
+    images.unshift(featured);
+    setEditingProduct({ ...editingProduct, images });
   };
 
   const filtered = products.filter(p =>
@@ -194,14 +270,167 @@ export const ProductsManager: React.FC = () => {
                 </div>
               </div>
 
-              <div>
-                <label className="text-zinc-400 font-bold uppercase block mb-1">Image URL (Cloudinary / Unsplash)</label>
-                <input
-                  type="text"
-                  value={editingProduct.images?.[0] || ''}
-                  onChange={e => setEditingProduct({ ...editingProduct, images: [e.target.value] })}
-                  className="w-full bg-zinc-900 border border-zinc-800 rounded-xl p-2.5 text-white"
-                />
+              {/* Cloudinary Image Upload Section */}
+              <div className="bg-zinc-900/80 border border-zinc-800 p-4 rounded-2xl space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <label className="text-amber-400 font-bold uppercase tracking-wider block text-xs">
+                      Product Media & Cloudinary Direct Upload
+                    </label>
+                    <span className="text-[10px] text-zinc-400 block">
+                      Directly upload images to Cloudinary. Max size: 5MB. Formats: JPG, PNG, WEBP.
+                    </span>
+                  </div>
+                  <span className="text-[10px] font-mono bg-zinc-950 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30">
+                    {(editingProduct.images || []).length} Image(s)
+                  </span>
+                </div>
+
+                {/* Drag and Drop Zone */}
+                <div
+                  onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+                  onDragLeave={() => setIsDragging(false)}
+                  onDrop={handleDrop}
+                  className={`border-2 border-dashed rounded-xl p-5 text-center transition-all cursor-pointer ${
+                    isDragging
+                      ? 'border-amber-400 bg-amber-500/10'
+                      : 'border-zinc-700 hover:border-zinc-500 bg-zinc-950/60'
+                  }`}
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    onChange={handleFileSelect}
+                    accept="image/*"
+                    className="hidden"
+                  />
+                  
+                  <UploadCloud className="w-8 h-8 text-amber-400 mx-auto mb-2 animate-bounce" />
+                  <p className="text-xs font-semibold text-white">
+                    Drag & Drop your product image here, or <span className="text-amber-400 underline">Browse</span>
+                  </p>
+                  <p className="text-[10px] text-zinc-500 mt-1">
+                    Uploaded directly to Cloudinary CDN & saved to Google Sheets
+                  </p>
+                </div>
+
+                {/* Upload Progress Bar */}
+                {isUploading && (
+                  <div className="space-y-1 bg-zinc-950 p-2.5 rounded-xl border border-amber-500/30">
+                    <div className="flex items-center justify-between text-[11px] text-zinc-300">
+                      <span className="flex items-center gap-1.5 font-bold">
+                        <RefreshCw className="w-3.5 h-3.5 text-amber-400 animate-spin" /> Uploading to Cloudinary...
+                      </span>
+                      <span className="font-mono text-amber-400">{uploadProgress}%</span>
+                    </div>
+                    <div className="w-full bg-zinc-800 rounded-full h-1.5 overflow-hidden">
+                      <div
+                        className="bg-amber-400 h-1.5 rounded-full transition-all duration-300"
+                        style={{ width: `${uploadProgress}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Upload Success Alert */}
+                {uploadSuccessMsg && (
+                  <div className="p-2.5 bg-emerald-950/60 border border-emerald-800 text-emerald-300 rounded-xl text-xs flex items-center justify-between">
+                    <span className="flex items-center gap-1.5 font-medium">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400" /> {uploadSuccessMsg}
+                    </span>
+                    <button type="button" onClick={() => setUploadSuccessMsg('')} className="text-emerald-400 hover:text-white">
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
+
+                {/* Upload Error Alert */}
+                {uploadErrorMsg && (
+                  <div className="p-2.5 bg-red-950/60 border border-red-800 text-red-300 rounded-xl text-xs flex items-center justify-between">
+                    <span className="flex items-center gap-1.5 font-medium">
+                      <AlertCircle className="w-4 h-4 text-red-400" /> {uploadErrorMsg}
+                    </span>
+                    <button type="button" onClick={() => setUploadErrorMsg('')} className="text-red-400 hover:text-white">
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
+
+                {/* Uploaded Images Gallery Preview */}
+                {editingProduct.images && editingProduct.images.length > 0 && (
+                  <div className="space-y-2 pt-1">
+                    <span className="text-[11px] font-bold text-zinc-400 block uppercase">Product Image Gallery & Featured Image:</span>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      {editingProduct.images.map((imgUrl, idx) => {
+                        const isFeatured = idx === 0;
+                        return (
+                          <div
+                            key={idx}
+                            className={`relative group rounded-xl overflow-hidden border ${
+                              isFeatured ? 'border-amber-400 ring-2 ring-amber-400/30' : 'border-zinc-800'
+                            } bg-zinc-950`}
+                          >
+                            <img
+                              src={imgUrl}
+                              alt={`Product image ${idx + 1}`}
+                              referrerPolicy="no-referrer"
+                              className="w-full h-24 object-cover"
+                            />
+
+                            {/* Featured Badge */}
+                            {isFeatured && (
+                              <span className="absolute top-1.5 left-1.5 bg-amber-500 text-black text-[9px] font-black uppercase px-1.5 py-0.5 rounded shadow flex items-center gap-0.5">
+                                <Star className="w-2.5 h-2.5 fill-black" /> Featured
+                              </span>
+                            )}
+
+                            {/* Image Actions Overlay */}
+                            <div className="absolute inset-0 bg-black/75 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1.5 p-1">
+                              {!isFeatured && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleSetFeaturedImage(idx)}
+                                  className="bg-amber-500 text-black px-2 py-0.5 rounded text-[10px] font-bold uppercase flex items-center gap-1 hover:bg-amber-400"
+                                >
+                                  <Star className="w-3 h-3" /> Set Featured
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveImage(idx)}
+                                className="bg-red-600 text-white px-2 py-0.5 rounded text-[10px] font-bold uppercase flex items-center gap-1 hover:bg-red-500"
+                              >
+                                <Trash2 className="w-3 h-3" /> Delete
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Manual Cloudinary URL Direct Input fallback */}
+                <div className="pt-1">
+                  <label className="text-[10px] font-bold uppercase text-zinc-500 block mb-1">
+                    Direct Image URL Input (Cloudinary / Unsplash)
+                  </label>
+                  <input
+                    type="text"
+                    value={editingProduct.images?.[0] || ''}
+                    onChange={e => {
+                      const newUrl = e.target.value.trim();
+                      if (newUrl) {
+                        const current = editingProduct.images ? [...editingProduct.images] : [];
+                        current[0] = newUrl;
+                        setEditingProduct({ ...editingProduct, images: current });
+                      }
+                    }}
+                    placeholder="https://res.cloudinary.com/your-cloud-name/image/upload/..."
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2 text-[11px] text-white font-mono"
+                  />
+                </div>
               </div>
 
               <div>

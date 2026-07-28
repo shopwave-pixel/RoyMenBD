@@ -82,13 +82,16 @@ var SHEETS = {
   SHIPPING_SETTINGS: '28_Shipping_Settings',
   APP_SETTINGS: '29_App_Settings',
   BACKUP_LOG: '30_Backup_Log',
-  OTP_STORE: 'OTP_Store',
-  CUSTOMER_LOGIN: 'Customer_Login',
-  LOGIN_LOG: 'Login_Log',
-  SYSTEM_ERROR_LOG: 'System_Error_Log',
-  CUSTOMER_SESSIONS: 'Customer_Sessions',
-  PAYMENT_LOG: 'Payment_Log',
-  ACTIVITY_LOG: 'Activity_Log'
+  OTP_STORE: '31_OTP_Store',
+  CUSTOMER_LOGIN: '32_Customer_Login',
+  CUSTOMER_SESSIONS: '33_Customer_Sessions',
+  LOGIN_LOG: '34_Login_Log',
+  PAYMENT_LOG: '35_Payment_Log',
+  ACTIVITY_LOG: '36_Activity_Log',
+  SYSTEM_ERROR_LOG: '37_System_Error_Log',
+  CUSTOMER_ADDRESS: '38_Customer_Address',
+  CUSTOMER_PROFILE: '39_Customer_Profile',
+  INVOICE_EDIT_LOG: '41_Invoice_Edit_Log'
 };
 
 var SCHEMAS = {
@@ -123,13 +126,28 @@ var SCHEMAS = {
   '28_Shipping_Settings': ['Zone', 'FeeInsideDhaka', 'FeeOutsideDhaka', 'FreeShippingMin', 'CourierPartner'],
   '29_App_Settings': ['AppName', 'Tagline', 'CurrencySymbol', 'Country', 'SupportEmail', 'SupportPhone'],
   '30_Backup_Log': ['BackupID', 'SheetName', 'RowCount', 'Timestamp', 'Status'],
+  '31_OTP_Store': ['Email', 'OTP', 'CreatedAt', 'ExpiresAt', 'Status', 'UsedAt'],
   'OTP_Store': ['Email', 'OTP', 'CreatedAt', 'ExpiresAt', 'Status', 'UsedAt'],
+  '32_Customer_Login': ['ID', 'Email', 'LoginTime', 'IP', 'Browser', 'Device', 'Status'],
   'Customer_Login': ['ID', 'Email', 'LoginTime', 'IP', 'Browser', 'Device', 'Status'],
-  'Login_Log': ['ID', 'Email', 'LoginTime', 'Status', 'IP', 'Browser', 'Device', 'Reason'],
-  'System_Error_Log': ['ID', 'Timestamp', 'Module', 'Function', 'ErrorMessage', 'StackTrace', 'User'],
+  '33_Customer_Sessions': ['SessionID', 'UserID', 'Email', 'Token', 'CreatedAt', 'ExpiresAt', 'Status'],
   'Customer_Sessions': ['SessionID', 'UserID', 'Email', 'Token', 'CreatedAt', 'ExpiresAt', 'Status'],
+  '34_Login_Log': ['ID', 'Email', 'LoginTime', 'Status', 'IP', 'Browser', 'Device', 'Reason'],
+  'Login_Log': ['ID', 'Email', 'LoginTime', 'Status', 'IP', 'Browser', 'Device', 'Reason'],
+  '35_Payment_Log': ['PaymentID', 'OrderID', 'Amount', 'Gateway', 'TransactionID', 'Status', 'Timestamp'],
   'Payment_Log': ['PaymentID', 'OrderID', 'Amount', 'Gateway', 'TransactionID', 'Status', 'Timestamp'],
-  'Activity_Log': ['ID', 'User', 'Action', 'Target', 'Details', 'Timestamp']
+  '36_Activity_Log': ['ID', 'User', 'Action', 'Target', 'Details', 'Timestamp'],
+  'Activity_Log': ['ID', 'User', 'Action', 'Target', 'Details', 'Timestamp'],
+  '37_System_Error_Log': ['ID', 'Timestamp', 'Module', 'Function', 'ErrorMessage', 'StackTrace', 'User'],
+  'System_Error_Log': ['ID', 'Timestamp', 'Module', 'Function', 'ErrorMessage', 'StackTrace', 'User'],
+  '38_Customer_Address': ['ID', 'CustomerID', 'AddressType', 'FullName', 'Phone', 'Division', 'District', 'Thana', 'FullAddress', 'IsDefault', 'CreatedAt'],
+  'Customer_Address': ['ID', 'CustomerID', 'AddressType', 'FullName', 'Phone', 'Division', 'District', 'Thana', 'FullAddress', 'IsDefault', 'CreatedAt'],
+  '39_Customer_Profile': ['CustomerID', 'FullName', 'Email', 'Phone', 'Gender', 'BirthDate', 'AvatarUrl', 'MembershipTier', 'TotalSpent', 'TotalOrders', 'UpdatedAt'],
+  'Customer_Profile': ['CustomerID', 'FullName', 'Email', 'Phone', 'Gender', 'BirthDate', 'AvatarUrl', 'MembershipTier', 'TotalSpent', 'TotalOrders', 'UpdatedAt'],
+  '40_API_Request_Log': ['ID', 'Endpoint', 'Method', 'IP', 'UserAgent', 'ResponseTimeMs', 'StatusCode', 'Timestamp'],
+  'API_Request_Log': ['ID', 'Endpoint', 'Method', 'IP', 'UserAgent', 'ResponseTimeMs', 'StatusCode', 'Timestamp'],
+  '41_Invoice_Edit_Log': ['ID', 'OrderID', 'AdminName', 'AdminEmail', 'EditedFields', 'OldValues', 'NewValues', 'Timestamp'],
+  'Invoice_Edit_Log': ['ID', 'OrderID', 'AdminName', 'AdminEmail', 'EditedFields', 'OldValues', 'NewValues', 'Timestamp']
 };
 `
   },
@@ -374,7 +392,10 @@ function doGet(e) {
         return createJsonResponse(runFullHealthCheck(), true, 'System Health Diagnostic Complete');
 
       case 'setup_sheets':
-        return createJsonResponse({ report: healReport }, true, 'Zero-Config Auto-Installer Executed');
+        var healReport = runZeroConfigBootSequence();
+        var isSuccess = healReport && healReport.status === 'SUCCESS';
+        var msg = healReport && healReport.message ? healReport.message : 'Installer Executed';
+        return createJsonResponse({ report: healReport, diagnostic: healReport }, isSuccess, msg);
 
       default:
         return createJsonResponse({ status: 'ONLINE', healReport: healReport }, true, 'ROYMEN REST API v2.0 Online');
@@ -386,26 +407,6 @@ function doGet(e) {
     return createErrorResponse(err.toString());
   } finally {
     lock.releaseLock();
-  }
-}
-
-function sendCustomerOrderConfirmation(order) {
-  try {
-    if (typeof sendCustomerOrderConfirmationEmail === 'function') {
-      return sendCustomerOrderConfirmationEmail(order);
-    }
-  } catch(e) {
-    Logger.log('sendCustomerOrderConfirmation error: ' + e.toString());
-  }
-}
-
-function sendAdminNewOrderNotification(order) {
-  try {
-    if (typeof sendAdminNewOrderAlertEmail === 'function') {
-      return sendAdminNewOrderAlertEmail(order);
-    }
-  } catch(e) {
-    Logger.log('sendAdminNewOrderNotification error: ' + e.toString());
   }
 }
 
@@ -431,6 +432,29 @@ function doPost(e) {
     var payload = postData.payload || postData;
 
     switch (action) {
+      case 'UPDATE_INVOICE':
+      case 'updateInvoice':
+        if (payload && payload.editLog) {
+          try {
+            var ss = getActiveSpreadsheet();
+            var logSheet = ss.getSheetByName('Invoice_Edit_Log') || ss.getSheetByName(SHEETS.INVOICE_EDIT_LOG || '41_Invoice_Edit_Log');
+            if (logSheet) {
+              logSheet.appendRow([
+                payload.editLog.id || generateUniqueId('IEL'),
+                payload.editLog.orderId || '',
+                payload.editLog.adminName || '',
+                payload.editLog.adminEmail || '',
+                JSON.stringify(payload.editLog.editedFields || []),
+                JSON.stringify(payload.editLog.oldValues || {}),
+                JSON.stringify(payload.editLog.newValues || {}),
+                payload.editLog.timestamp || new Date().toISOString()
+              ]);
+            }
+          } catch (invErr) {
+            Logger.log('Invoice_Edit_Log error: ' + invErr.toString());
+          }
+        }
+        return createJsonResponse({ updated: true }, true, 'Invoice update recorded.');
       case 'checkEmailType':
         return createJsonResponse(checkUserOrAdminEmail(payload.email), true, 'Email classification complete.');
 
@@ -544,18 +568,70 @@ function doPost(e) {
 
 function runZeroConfigBootSequence() {
   var logs = [];
+  var createdSheets = [];
+  var existingSheets = [];
+  var missingSheets = [];
 
   try {
     var ss = getActiveSpreadsheet();
     if (!ss) {
+      Logger.log("Errors: Unable to access active Google Spreadsheet instance.");
       logs.push("Errors: Unable to access active Google Spreadsheet instance.");
       return logs;
     }
 
-    for (var tabName in SCHEMAS) {
+    // Assemble unified target sheets list from SHEETS object values AND SCHEMAS keys
+    var allTargets = [];
+    var seenNames = {};
+
+    // 1. Collect all values from SHEETS
+    var sheetKeys = Object.keys(SHEETS);
+    for (var k = 0; k < sheetKeys.length; k++) {
+      var sVal = SHEETS[sheetKeys[k]];
+      if (sVal && !seenNames[sVal]) {
+        seenNames[sVal] = true;
+        allTargets.push(sVal);
+      }
+    }
+
+    // 2. Collect all keys from SCHEMAS to ensure 100% schema coverage
+    var schemaKeys = Object.keys(SCHEMAS);
+    for (var m = 0; m < schemaKeys.length; m++) {
+      var schKey = schemaKeys[m];
+      if (schKey) {
+        var unPref = schKey.replace(/^[0-9]+_/, '');
+        var alreadyCovered = false;
+        for (var exName in seenNames) {
+          if (exName === schKey || exName.replace(/^[0-9]+_/, '') === unPref) {
+            alreadyCovered = true;
+            break;
+          }
+        }
+        if (!alreadyCovered) {
+          seenNames[schKey] = true;
+          allTargets.push(schKey);
+        }
+      }
+    }
+
+    var expectedSheetCount = allTargets.length;
+    Logger.log("Expected Sheet Count: " + expectedSheetCount);
+
+    // PASS 1: Iterate over EVERY sheet defined inside SHEETS & SCHEMAS
+    for (var i = 0; i < allTargets.length; i++) {
+      var tabName = allTargets[i];
+
       try {
-        var expectedHeaders = SCHEMAS[tabName];
+        var expectedHeaders = SCHEMAS[tabName] || SCHEMAS[tabName.replace(/^[0-9]+_/, '')] || ['ID', 'CreatedAt'];
+        
+        // Check if sheet exists by exact name or un-prefixed name
         var sheet = ss.getSheetByName(tabName);
+        if (!sheet) {
+          var unPrefixedName = tabName.replace(/^[0-9]+_/, '');
+          if (unPrefixedName !== tabName) {
+            sheet = ss.getSheetByName(unPrefixedName);
+          }
+        }
 
         if (!sheet) {
           // AUTO CREATE MISSING SHEET
@@ -566,8 +642,14 @@ function runZeroConfigBootSequence() {
             .setBackground('#18181b')
             .setFontColor('#ffffff');
           sheet.setFrozenRows(1);
+          
+          Logger.log("Sheet Created: " + tabName);
+          createdSheets.push(tabName);
           logs.push("Sheet Created: Created missing sheet '" + tabName + "' with " + expectedHeaders.length + " headers.");
         } else {
+          Logger.log("Sheet Exists: " + sheet.getName());
+          existingSheets.push(sheet.getName());
+
           // SELF-HEALING: CHECK EXISTING SHEET
           var lastRow = sheet.getLastRow();
           var lastCol = sheet.getLastColumn();
@@ -575,8 +657,8 @@ function runZeroConfigBootSequence() {
           var existingHeaders = data[0] || [];
           
           var hasValidHeaders = false;
-          for (var k = 0; k < existingHeaders.length; k++) {
-            if (existingHeaders[k] && String(existingHeaders[k]).trim() !== '') {
+          for (var hIdx = 0; hIdx < existingHeaders.length; hIdx++) {
+            if (existingHeaders[hIdx] && String(existingHeaders[hIdx]).trim() !== '') {
               hasValidHeaders = true;
               break;
             }
@@ -590,7 +672,8 @@ function runZeroConfigBootSequence() {
               .setBackground('#18181b')
               .setFontColor('#ffffff');
             sheet.setFrozenRows(1);
-            logs.push("Header Restored: Restored headers for sheet '" + tabName + "'.");
+            Logger.log("Headers Created: " + sheet.getName());
+            logs.push("Headers Created: Restored headers for sheet '" + sheet.getName() + "'.");
           } else {
             // AUTO COLUMN ADDITION & HEADER REPAIR
             var currentHeaderStrings = [];
@@ -606,7 +689,7 @@ function runZeroConfigBootSequence() {
               var foundIdx = currentHeaderStrings.indexOf(expectedCol);
 
               if (foundIdx === -1) {
-                // Column missing -> append to right
+                // Column missing -> append to right without overwriting existing data
                 var newColIdx = currentHeaderStrings.length + 1;
                 sheet.getRange(1, newColIdx)
                   .setValue(expectedCol)
@@ -615,7 +698,8 @@ function runZeroConfigBootSequence() {
                   .setFontColor('#ffffff');
                 currentHeaderStrings.push(expectedCol);
                 columnsAdded++;
-                logs.push("Column Added: Added missing column '" + expectedCol + "' in sheet '" + tabName + "'.");
+                Logger.log("Columns Added: " + expectedCol + " to " + sheet.getName());
+                logs.push("Columns Added: Added missing column '" + expectedCol + "' in sheet '" + sheet.getName() + "'.");
               }
             }
 
@@ -632,16 +716,69 @@ function runZeroConfigBootSequence() {
               .setFontColor('#ffffff');
 
             if (columnsAdded > 0 || headerRepaired) {
-              logs.push("Repair Completed: Repaired headers and structure for sheet '" + tabName + "'.");
+              logs.push("Repair Completed: Repaired headers and structure for sheet '" + sheet.getName() + "'.");
             } else {
-              logs.push("Already Exists: Sheet '" + tabName + "' is healthy and up to date.");
+              logs.push("Already Exists: Sheet '" + sheet.getName() + "' is healthy and up to date.");
             }
           }
         }
       } catch (sheetErr) {
+        Logger.log("Errors: Failed to verify/repair sheet '" + tabName + "': " + sheetErr.toString());
         logs.push("Errors: Failed to verify/repair sheet '" + tabName + "': " + sheetErr.toString());
       }
     }
+
+    // PASS 2: INSTALLER VALIDATION & FAIL-SAFE HEALING
+    missingSheets = [];
+    for (var v = 0; v < allTargets.length; v++) {
+      var vTarget = allTargets[v];
+      var vSheet = ss.getSheetByName(vTarget) || ss.getSheetByName(vTarget.replace(/^[0-9]+_/, ''));
+      if (!vSheet) {
+        missingSheets.push(vTarget);
+      }
+    }
+
+    // FAIL-SAFE: If any sheet is still missing, force creation immediately!
+    if (missingSheets.length > 0) {
+      Logger.log("Missing Sheet Names: " + missingSheets.join(", "));
+      for (var f = 0; f < missingSheets.length; f++) {
+        var mTarget = missingSheets[f];
+        var mHeaders = SCHEMAS[mTarget] || SCHEMAS[mTarget.replace(/^[0-9]+_/, '')] || ['ID', 'CreatedAt'];
+        try {
+          var createdF = ss.insertSheet(mTarget);
+          createdF.getRange(1, 1, 1, mHeaders.length).setValues([mHeaders]);
+          createdF.getRange(1, 1, 1, mHeaders.length)
+            .setFontWeight('bold')
+            .setBackground('#18181b')
+            .setFontColor('#ffffff');
+          createdF.setFrozenRows(1);
+          createdSheets.push(mTarget);
+          Logger.log("Sheet Created: " + mTarget);
+          logs.push("Sheet Created: Auto-created missing sheet '" + mTarget + "' during fail-safe validation.");
+        } catch (fErr) {
+          Logger.log("Errors: Fail-safe sheet creation failed for '" + mTarget + "': " + fErr.toString());
+        }
+      }
+
+      // Re-check missing sheets after fail-safe creation
+      missingSheets = [];
+      for (var v2 = 0; v2 < allTargets.length; v2++) {
+        var v2Target = allTargets[v2];
+        var v2Sheet = ss.getSheetByName(v2Target) || ss.getSheetByName(v2Target.replace(/^[0-9]+_/, ''));
+        if (!v2Sheet) {
+          missingSheets.push(v2Target);
+        }
+      }
+    }
+
+    var actualSheetCount = ss.getSheets().length;
+
+    // MANDATORY LOGGING DIAGNOSTICS
+    Logger.log("Expected Sheet Count: " + expectedSheetCount);
+    Logger.log("Actual Sheet Count: " + actualSheetCount);
+    Logger.log("Created Sheet Names: " + (createdSheets.length > 0 ? createdSheets.join(", ") : "None"));
+    Logger.log("Missing Sheet Names: " + (missingSheets.length > 0 ? missingSheets.join(", ") : "None"));
+    Logger.log("Repair Result: " + (missingSheets.length === 0 ? "SUCCESS" : "DEGRADED"));
 
     try {
       seedInitialSettingsIfMissing(ss, logs);
@@ -650,11 +787,42 @@ function runZeroConfigBootSequence() {
       logs.push("Errors: Seeding default settings/admin failed: " + seedErr.toString());
     }
 
-  } catch (err) {
-    logs.push("Errors: Zero-config boot sequence exception: " + err.toString());
-  }
+    var verifiedSheetCount = expectedSheetCount - missingSheets.length;
+    var isSuccess = missingSheets.length === 0;
 
-  return logs;
+    return {
+      status: isSuccess ? "SUCCESS" : "DEGRADED",
+      message: "Successfully verified " + verifiedSheetCount + "/" + expectedSheetCount + " sheets.",
+      expectedSheetCount: expectedSheetCount,
+      verifiedSheetCount: verifiedSheetCount,
+      createdSheetCount: createdSheets.length,
+      existingSheetCount: existingSheets.length,
+      missingSheetCount: missingSheets.length,
+      createdSheetNames: createdSheets,
+      existingSheetNames: existingSheets,
+      missingSheetNames: missingSheets,
+      repairActions: logs,
+      logs: logs
+    };
+  } catch (err) {
+    Logger.log("Errors: Zero-config boot sequence exception: " + err.toString());
+    logs.push("Errors: Zero-config boot sequence exception: " + err.toString());
+
+    return {
+      status: "FAILED",
+      message: "Boot sequence failed: " + err.toString(),
+      expectedSheetCount: 0,
+      verifiedSheetCount: 0,
+      createdSheetCount: 0,
+      existingSheetCount: 0,
+      missingSheetCount: 0,
+      createdSheetNames: [],
+      existingSheetNames: [],
+      missingSheetNames: [],
+      repairActions: logs,
+      logs: logs
+    };
+  }
 }
 
 function seedInitialSettingsIfMissing(ss, logs) {
@@ -2241,12 +2409,13 @@ function logSystemError(moduleName, functionName, errorMessage, stackTrace, user
 
 function runFullHealthCheck() {
   var ss = getActiveSpreadsheet();
+  var expectedCount = Object.keys(SHEETS).length;
   var report = {
     status: 'HEALTHY',
     spreadsheetId: ss.getId(),
     spreadsheetName: ss.getName(),
     sheetsFound: 0,
-    expectedSheetsCount: 30,
+    expectedSheetsCount: expectedCount,
     superAdminCreated: false,
     cacheService: 'OPERATIONAL',
     lockService: 'OPERATIONAL',
@@ -2257,6 +2426,20 @@ function runFullHealthCheck() {
 
   var sheets = ss.getSheets();
   report.sheetsFound = sheets.length;
+
+  var missing = [];
+  for (var sKey in SHEETS) {
+    var tName = SHEETS[sKey];
+    var s = ss.getSheetByName(tName) || ss.getSheetByName(tName.replace(/^[0-9]+_/, ''));
+    if (!s) {
+      missing.push(tName);
+    }
+  }
+
+  if (missing.length > 0) {
+    report.issues.push("Missing sheets: " + missing.join(", ") + ". Auto-healing triggered.");
+    runZeroConfigBootSequence();
+  }
 
   var adminSheet = ss.getSheetByName(SHEETS.ADMINS);
   if (adminSheet && adminSheet.getLastRow() > 1) {
@@ -2353,7 +2536,7 @@ function getSystemDeveloperConfig() {
   return {
     appVersion: APP_CONFIG.VERSION,
     dbVersion: APP_CONFIG.DB_VERSION,
-    sheetsCount: 30,
+    sheetsCount: Object.keys(SHEETS).length,
     supportedGateways: ['COD', 'bKash', 'Nagad', 'SSLCommerz'],
     activeSpreadsheetName: getActiveSpreadsheet().getName()
   };
@@ -2403,7 +2586,7 @@ export function buildEnterpriseBackend(): BuildResult {
  * ==============================================================================
  * ROYMEN ENTERPRISE E-COMMERCE PLATFORM - ZERO-CONFIGURATION GAS BACKEND
  * BRAND: ROYMEN | TAGLINE: Wear Confidence. | COUNTRY: BANGLADESH
- * SPREADSHEET TABS: 30 ENTERPRISE SHEETS
+ * SPREADSHEET TABS: ENTERPRISE SHEETS (AUTO-PROVISIONED)
  * VERSION: ${APP_CONFIG_META.VERSION} | BUILD: #${currentBuildCount} (${buildHash})
  * GENERATED AT: ${timestamp}
  * ==============================================================================

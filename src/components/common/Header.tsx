@@ -5,6 +5,7 @@ import {
   Heart,
   User as UserIcon,
   ShieldCheck,
+  Shield,
   Menu,
   X,
   ChevronDown,
@@ -46,21 +47,13 @@ export const Header: React.FC<HeaderProps> = ({
     <header className="sticky top-0 z-40 bg-zinc-950/95 backdrop-blur-md text-white border-b border-zinc-800">
       {/* Announcement Top Bar */}
       <div className="bg-zinc-900 border-b border-zinc-800/80 px-4 py-1.5 text-xs text-zinc-300">
-        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
+        <div className="max-w-7xl mx-auto flex items-center justify-center gap-2">
           <div className="flex items-center gap-2 font-medium tracking-wide">
             <span className="bg-amber-500/20 text-amber-300 text-[10px] font-semibold uppercase px-2 py-0.5 rounded border border-amber-500/30 flex items-center gap-1">
               <Sparkles className="w-3 h-3" /> EID & WINTER ATELIER '26
             </span>
             <span className="hidden sm:inline text-zinc-400">|</span>
             <span>FREE EXPRESS DELIVERY ON ORDERS OVER ৳5,000 IN BANGLADESH</span>
-          </div>
-
-          <div className="flex items-center gap-4 text-[11px] text-zinc-400">
-            <span className="flex items-center gap-1">
-              <Phone className="w-3 h-3 text-zinc-500" /> Hot Line: +880 1700-998877
-            </span>
-            <span className="text-zinc-700">|</span>
-            <span className="font-semibold text-zinc-200">{currency}</span>
           </div>
         </div>
       </div>
@@ -191,6 +184,18 @@ export const Header: React.FC<HeaderProps> = ({
                 </span>
               )}
             </button>
+
+            {/* Admin Mode Quick Access Badge */}
+            {currentUser && (currentUser.role === 'admin' || currentUser.role === 'super_admin' || (currentUser.role as string).toLowerCase().includes('admin')) && (
+              <button
+                onClick={() => onNavigate('admin')}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/40 text-[10px] font-black uppercase tracking-wider text-amber-400 transition-all shadow-md hover:scale-105"
+                title="Open Admin Dashboard"
+              >
+                <Shield className="w-3.5 h-3.5 text-amber-400" />
+                <span className="hidden xs:inline">ADMIN MODE</span>
+              </button>
+            )}
 
             {/* Account / User Button */}
             <button

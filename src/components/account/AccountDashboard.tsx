@@ -1,21 +1,25 @@
 import React, { useState } from 'react';
 import { User, Order } from '../../types';
 import { StorageService } from '../../services/storageService';
-import { Package, MapPin, User as UserIcon, LogOut, Truck, CheckCircle2, Clock, ChevronRight } from 'lucide-react';
+import { Package, MapPin, User as UserIcon, LogOut, Truck, CheckCircle2, Clock, ChevronRight, Shield, FileText } from 'lucide-react';
+import { InvoiceView } from '../common/InvoiceView';
 
 interface AccountDashboardProps {
   currentUser: User;
   onLogout: () => void;
   onOpenShop: () => void;
+  onOpenAdmin?: () => void;
 }
 
-export const AccountDashboard: React.FC<AccountDashboardProps> = ({ currentUser, onLogout, onOpenShop }) => {
+export const AccountDashboard: React.FC<AccountDashboardProps> = ({ currentUser, onLogout, onOpenShop, onOpenAdmin }) => {
   const [activeTab, setActiveTab] = useState<'orders' | 'profile' | 'addresses'>('orders');
   const [userOrders] = useState<Order[]>(() => {
     return StorageService.getOrders().filter(o => o.customerEmail.toLowerCase() === currentUser.email.toLowerCase());
   });
 
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(userOrders[0] || null);
+
+  const isAdmin = currentUser.role === 'admin' || currentUser.role === 'super_admin' || (currentUser.role as string).toLowerCase().includes('admin');
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 text-white font-sans">
@@ -28,7 +32,7 @@ export const AccountDashboard: React.FC<AccountDashboardProps> = ({ currentUser,
           </div>
           <div>
             <span className="text-[10px] font-black uppercase tracking-widest text-amber-400">
-              ROYMEN VIP CLIENT
+              {isAdmin ? 'ROYMEN EXECUTIVE ADMIN' : 'ROYMEN VIP CLIENT'}
             </span>
             <h1 className="text-2xl font-black text-white font-serif">{currentUser.name}</h1>
             <p className="text-xs text-zinc-400 mt-0.5">{currentUser.email} • {currentUser.phone || 'No phone set'}</p>
@@ -48,6 +52,18 @@ export const AccountDashboard: React.FC<AccountDashboardProps> = ({ currentUser,
         
         {/* Navigation Sidebar */}
         <div className="lg:col-span-3 space-y-2">
+          {isAdmin && (
+            <button
+              onClick={onOpenAdmin}
+              className="w-full text-left px-4 py-3.5 rounded-2xl text-xs font-black uppercase tracking-wider transition-all flex items-center justify-between border bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 text-black border-amber-300 shadow-xl hover:brightness-110 mb-3 cursor-pointer"
+            >
+              <span className="flex items-center gap-2.5 font-extrabold text-black">
+                <Shield className="w-4 h-4 text-black" /> Admin Dashboard
+              </span>
+              <ChevronRight className="w-4 h-4 text-black" />
+            </button>
+          )}
+
           <button
             onClick={() => setActiveTab('orders')}
             className={`w-full text-left px-4 py-3 rounded-2xl text-xs font-bold uppercase tracking-wider transition-colors flex items-center justify-between border ${
@@ -177,15 +193,9 @@ export const AccountDashboard: React.FC<AccountDashboardProps> = ({ currentUser,
                         </div>
                       </div>
 
-                      {/* Items */}
-                      <div className="pt-4 border-t border-zinc-800 space-y-2">
-                        <h4 className="text-xs font-bold uppercase text-zinc-400">Order Items</h4>
-                        {selectedOrder.items.map((it) => (
-                          <div key={it.id} className="flex justify-between items-center text-xs py-1">
-                            <span className="text-zinc-300">{it.productName} ({it.selectedColor} / {it.selectedSize}) × {it.quantity}</span>
-                            <span className="font-bold text-white">৳{it.subtotal.toLocaleString()}</span>
-                          </div>
-                        ))}
+                      {/* Complete Official Invoice */}
+                      <div className="pt-4 border-t border-zinc-800">
+                        <InvoiceView order={selectedOrder} onPrint={() => window.print()} onClose={() => setSelectedOrder(null)} />
                       </div>
                     </div>
                   )}
