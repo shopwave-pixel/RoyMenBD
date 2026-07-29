@@ -362,11 +362,11 @@ export class StorageService {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify(payloadObj)
-      }).catch(err => console.log('GAS OTP POST dispatch info:', err));
-
-      // 2. Fallback GET ping with explicit query parameters
-      const getUrl = `${webAppUrl}${webAppUrl.includes('?') ? '&' : '?'}action=sendOTP&email=${encodeURIComponent(normEmail)}&otp=${encodeURIComponent(otp)}&name=${encodeURIComponent(normEmail.split('@')[0])}`;
-      fetch(getUrl, { method: 'GET' }).catch(err => console.log('GAS OTP GET ping error:', err));
+      }).catch(() => {
+        // Fallback GET ping only if POST fails
+        const getUrl = `${webAppUrl}${webAppUrl.includes('?') ? '&' : '?'}action=sendOTP&email=${encodeURIComponent(normEmail)}&otp=${encodeURIComponent(otp)}&name=${encodeURIComponent(normEmail.split('@')[0])}`;
+        fetch(getUrl, { method: 'GET' }).catch(err => console.log('GAS OTP GET fallback error:', err));
+      });
     }
 
     return {
@@ -919,14 +919,14 @@ export class StorageService {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify({ action, payload, timestamp: new Date().toISOString() })
-      }).catch(err => console.log('GAS sync ping POST background error:', err));
-
-      // 2. Dispatch GET fallback ping with encoded JSON payload
-      if (payload && typeof payload === 'object') {
-        const payloadStr = JSON.stringify(payload);
-        const getUrl = `${webAppUrl}${webAppUrl.includes('?') ? '&' : '?'}action=${encodeURIComponent(action)}&payload=${encodeURIComponent(payloadStr)}`;
-        fetch(getUrl, { method: 'GET' }).catch(err => console.log('GAS sync ping GET background error:', err));
-      }
+      }).catch(() => {
+        // Fallback GET ping only if POST fails
+        if (payload && typeof payload === 'object') {
+          const payloadStr = JSON.stringify(payload);
+          const getUrl = `${webAppUrl}${webAppUrl.includes('?') ? '&' : '?'}action=${encodeURIComponent(action)}&payload=${encodeURIComponent(payloadStr)}`;
+          fetch(getUrl, { method: 'GET' }).catch(err => console.log('GAS sync ping GET fallback error:', err));
+        }
+      });
 
       return {
         success: true,

@@ -383,9 +383,14 @@ function doGet(e) {
 
       case 'placeOrder':
       case 'POST_ORDER':
-        var custEmailGet = ((payload && (payload.customerEmail || payload.email || payload.Email)) || params.customerEmail || params.email || params.Email || '').toString().trim();
+        var custEmailGet = ((payload && (payload.customerEmail || payload.email || payload.Email || payload.userEmail)) || params.customerEmail || params.email || params.Email || params.userEmail || '').toString().trim();
         if (!custEmailGet || custEmailGet.indexOf('@') === -1) {
-          return createErrorResponse('401 Unauthorized: Mandatory customer authentication is required before placing an order.');
+          return createJsonResponse({
+            success: false,
+            error: 'Email missing in order payload or invalid customer authentication',
+            receivedPayload: payload,
+            receivedQueryParams: params
+          }, false, '401 Unauthorized: Mandatory customer authentication email is required before placing an order.');
         }
         var orderIdGet = saveOrderToSheet(payload);
         payload.id = orderIdGet;
@@ -536,9 +541,15 @@ function doPost(e) {
 
       case 'placeOrder':
       case 'POST_ORDER':
-        var custEmail = (payload.customerEmail || payload.email || payload.Email || '').toString().trim();
+        var custEmail = ((payload && (payload.customerEmail || payload.email || payload.Email || payload.userEmail)) || postData.customerEmail || postData.email || postData.Email || postData.userEmail || (e && e.parameter && (e.parameter.customerEmail || e.parameter.email)) || '').toString().trim();
         if (!custEmail || custEmail.indexOf('@') === -1) {
-          return createErrorResponse('401 Unauthorized: Mandatory customer authentication is required before placing an order.');
+          return createJsonResponse({
+            success: false,
+            error: 'Email missing in order payload or invalid customer authentication',
+            receivedPayload: payload,
+            receivedPostData: postData,
+            receivedParameters: (e && e.parameter) ? e.parameter : {}
+          }, false, '401 Unauthorized: Mandatory customer authentication email is required before placing an order.');
         }
         var orderId = saveOrderToSheet(payload);
         payload.id = orderId;
@@ -1652,8 +1663,8 @@ function saveOrderToSheet(order) {
           it.productId || it.id || '',
           it.name || it.productName || 'ROYMEN Item',
           it.sku || '',
-          it.color || it.variantColor || '',
-          it.size || it.variantSize || '',
+          typeof it.selectedColor === 'object' ? (it.selectedColor.name || '') : (it.color || it.selectedColor || it.variantColor || ''),
+          typeof it.selectedSize === 'object' ? (it.selectedSize.name || '') : (it.size || it.selectedSize || it.variantSize || ''),
           itemPrice,
           itemQty,
           itemSubtotal,
