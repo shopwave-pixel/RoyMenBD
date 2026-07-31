@@ -1143,18 +1143,19 @@ function generateAndSendOTP(email, name, customOtp) {
   if (typeof email === 'string') {
     targetEmail = email;
   } else if (email && typeof email === 'object') {
-    targetEmail = email.email || email.Email || email.customerEmail || email.userEmail || '';
-    if (!name && email.name) {
-      name = email.name;
+    targetEmail = email.email || email.Email || email.customerEmail || email.userEmail || (email.payload && (email.payload.email || email.payload.Email || email.payload.customerEmail || email.payload.userEmail)) || '';
+    if (!name) {
+      name = email.name || email.Name || email.customerName || (email.payload && (email.payload.name || email.payload.Name || email.payload.customerName));
     }
-    if (!customOtp && email.otp) {
-      customOtp = email.otp;
+    if (!customOtp) {
+      customOtp = email.otp || email.OTP || (email.payload && (email.payload.otp || email.payload.OTP));
     }
   }
 
   targetEmail = (targetEmail || '').toString().trim().toLowerCase();
 
   Logger.log('================== [ENTERPRISE generateAndSendOTP EXECUTION] ==================');
+  Logger.log('RAW INPUT PARAMETERS: email=' + JSON.stringify(email) + ', name=' + name + ', customOtp=' + customOtp);
   Logger.log('TARGET EMAIL: "' + targetEmail + '"');
   Logger.log('TARGET NAME: "' + (name || 'Valued Customer') + '"');
   Logger.log('CUSTOM OTP PROVIDED: "' + (customOtp || 'NONE') + '"');
@@ -1191,15 +1192,20 @@ function generateAndSendOTP(email, name, customOtp) {
   var expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
 
   // Write OTP to Google Sheets OTP_Store table immediately
+  var sheetFound = false;
+  var rowInserted = false;
   try {
     var ss = getActiveSpreadsheet();
-    var otpSheet = ss.getSheetByName('OTP_Store') || ss.getSheetByName(SHEETS.OTP_STORE);
+    var otpSheet = ss.getSheetByName('31_OTP_Store') || ss.getSheetByName('OTP_Store') || ss.getSheetByName(SHEETS.OTP_STORE);
     if (!otpSheet) {
+      Logger.log('OTP_Store tab missing, executing zero-config boot sequence...');
       runZeroConfigBootSequence();
-      otpSheet = ss.getSheetByName('OTP_Store') || ss.getSheetByName(SHEETS.OTP_STORE);
+      otpSheet = ss.getSheetByName('31_OTP_Store') || ss.getSheetByName('OTP_Store') || ss.getSheetByName(SHEETS.OTP_STORE);
     }
 
     if (otpSheet) {
+      sheetFound = true;
+      Logger.log('OTP Sheet Found: "' + otpSheet.getName() + '"');
       var data = otpSheet.getDataRange().getValues();
       for (var i = 1; i < data.length; i++) {
         var rowEmail = (data[i][0] || '').toString().trim().toLowerCase();
@@ -1210,10 +1216,13 @@ function generateAndSendOTP(email, name, customOtp) {
         }
       }
 
-      Logger.log('OTP_Store Write Start: Sheet="OTP_Store", Email="' + targetEmail + '", OTP="' + otp + '", Status="ACTIVE"');
+      Logger.log('OTP_Store Write Start: Sheet="' + otpSheet.getName() + '", Email="' + targetEmail + '", OTP="' + otp + '", Status="ACTIVE"');
       otpSheet.appendRow([targetEmail, otp, createdAt, expiresAt, 'ACTIVE', '']);
       var lastRow = otpSheet.getLastRow();
-      Logger.log('OTP_Store Write Success: Sheet="OTP_Store", Row=' + lastRow + ', Email="' + targetEmail + '", OTP="' + otp + '"');
+      rowInserted = true;
+      Logger.log('OTP_Store Row Inserted Success: Sheet="' + otpSheet.getName() + '", Row=' + lastRow + ', Email="' + targetEmail + '", OTP="' + otp + '"');
+    } else {
+      Logger.log('CRITICAL: OTP_Store sheet could not be created or accessed!');
     }
   } catch (sheetErr) {
     Logger.log('OTP_Store Write Exception: ' + sheetErr.toString());
@@ -1221,8 +1230,12 @@ function generateAndSendOTP(email, name, customOtp) {
   }
 
   // Cache in Script Cache as fast backup layer
-  var userCache = CacheService.getScriptCache();
-  userCache.put('OTP_' + targetEmail, otp, 600);
+  try {
+    var userCache = CacheService.getScriptCache();
+    userCache.put('OTP_' + targetEmail, otp, 600);
+  } catch (cacheErr) {
+    Logger.log('ScriptCache Warning: ' + cacheErr.toString());
+  }
 
   Logger.log('================== [OTP GENERATION & SAVE LOG] ==================');
   Logger.log('Generated OTP: ' + otp);
@@ -1230,17 +1243,23 @@ function generateAndSendOTP(email, name, customOtp) {
   Logger.log('Email: ' + targetEmail);
   Logger.log('Created At: ' + createdAt);
   Logger.log('Expires At: ' + expiresAt);
+  Logger.log('OTP SHEET FOUND: ' + sheetFound);
+  Logger.log('ROW INSERTED: ' + rowInserted);
   Logger.log('Expiry Status: VALID');
   Logger.log('==================================================================');
 
   var sendResult = sendCustomerOTPEmail(targetEmail, otp, custName);
+  Logger.log('EMAIL SENT RESULT: ' + JSON.stringify(sendResult));
 
-  logAuditTrail(targetEmail, 'OTP_GENERATED', 'OTP_Store', 'OTP generated and sent to email: ' + targetEmail);
+  logAuditTrail(targetEmail, 'OTP_GENERATED', '31_OTP_Store', 'OTP generated and dispatched to email: ' + targetEmail + ' (Sent: ' + (sendResult && sendResult.success) + ')');
 
   return { 
     success: sendResult && sendResult.success !== false, 
     otp: otp, 
     recipient: targetEmail,
+    sheetFound: sheetFound,
+    rowInserted: rowInserted,
+    emailSent: Boolean(sendResult && sendResult.success),
     message: sendResult && sendResult.success !== false ? 'Login OTP verification code dispatched to ' + targetEmail : 'OTP generated, but email delivery failed: ' + (sendResult ? sendResult.error : 'Unknown error') 
   };
 }
