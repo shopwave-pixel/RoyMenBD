@@ -1194,39 +1194,107 @@ function generateAndSendOTP(email, name, customOtp) {
   // Write OTP to Google Sheets OTP_Store table immediately
   var sheetFound = false;
   var rowInserted = false;
+  var rowVerified = false;
+  var sheetName = 'NULL';
+  var sheetId = 'NULL';
+  var lastRowBefore = -1;
+  var lastRowAfter = -1;
+  var insertedValues = [];
+
   try {
     var ss = getActiveSpreadsheet();
-    var otpSheet = ss.getSheetByName('31_OTP_Store') || ss.getSheetByName('OTP_Store') || ss.getSheetByName(SHEETS.OTP_STORE);
-    if (!otpSheet) {
-      Logger.log('OTP_Store tab missing, executing zero-config boot sequence...');
+    var ssName = ss ? ss.getName() : 'NULL';
+    var ssId = ss ? ss.getId() : 'NULL';
+    Logger.log('Spreadsheet Name: "' + ssName + '"');
+    Logger.log('Spreadsheet ID: "' + ssId + '"');
+    Logger.log('Active Spreadsheet ID: "' + ssId + '"');
+
+    var otpSheet = ss ? (ss.getSheetByName('31_OTP_Store') || ss.getSheetByName('OTP_Store') || ss.getSheetByName(SHEETS.OTP_STORE)) : null;
+    if (!otpSheet && ss) {
+      Logger.log('31_OTP_Store tab missing, executing zero-config boot sequence...');
       runZeroConfigBootSequence();
       otpSheet = ss.getSheetByName('31_OTP_Store') || ss.getSheetByName('OTP_Store') || ss.getSheetByName(SHEETS.OTP_STORE);
     }
 
     if (otpSheet) {
       sheetFound = true;
-      Logger.log('OTP Sheet Found: "' + otpSheet.getName() + '"');
+      sheetName = otpSheet.getName();
+      try {
+        sheetId = otpSheet.getSheetId();
+      } catch (eSid) {
+        sheetId = 'N/A';
+      }
+      Logger.log('Sheet Found: true');
+      Logger.log('Sheet Name: "' + sheetName + '"');
+      Logger.log('Sheet ID: "' + sheetId + '"');
+
       var data = otpSheet.getDataRange().getValues();
       for (var i = 1; i < data.length; i++) {
         var rowEmail = (data[i][0] || '').toString().trim().toLowerCase();
         var rowStatus = (data[i][4] || '').toString().trim().toUpperCase();
         if (rowEmail === targetEmail && rowStatus === 'ACTIVE') {
           otpSheet.getRange(i + 1, 5).setValue('REPLACED');
-          Logger.log('OTP_Store: Replaced existing ACTIVE OTP for email "' + targetEmail + '" at row ' + (i + 1));
+          Logger.log('31_OTP_Store: Replaced existing ACTIVE OTP for email "' + targetEmail + '" at row ' + (i + 1));
         }
       }
 
-      Logger.log('OTP_Store Write Start: Sheet="' + otpSheet.getName() + '", Email="' + targetEmail + '", OTP="' + otp + '", Status="ACTIVE"');
+      lastRowBefore = otpSheet.getLastRow();
+      Logger.log('Last Row BEFORE append: ' + lastRowBefore);
+      Logger.log('appendRow START: Sheet="' + sheetName + '", Email="' + targetEmail + '", OTP="' + otp + '", Status="ACTIVE"');
+
       otpSheet.appendRow([targetEmail, otp, createdAt, expiresAt, 'ACTIVE', '']);
-      var lastRow = otpSheet.getLastRow();
-      rowInserted = true;
-      Logger.log('OTP_Store Row Inserted Success: Sheet="' + otpSheet.getName() + '", Row=' + lastRow + ', Email="' + targetEmail + '", OTP="' + otp + '"');
+      SpreadsheetApp.flush(); // Force immediate engine flush
+
+      lastRowAfter = otpSheet.getLastRow();
+      Logger.log('Last Row AFTER append: ' + lastRowAfter);
+      Logger.log('appendRow SUCCESS');
+
+      // Immediate row validation check
+      if (lastRowAfter > 0) {
+        var rowRange = otpSheet.getRange(lastRowAfter, 1, 1, 6);
+        var rowVals = rowRange.getValues()[0];
+        insertedValues = rowVals;
+
+        Logger.log('Inserted Row: ' + lastRowAfter);
+        Logger.log(JSON.stringify(rowVals));
+        Logger.log('Inserted Values: ' + JSON.stringify(rowVals));
+
+        var valEmail = (rowVals[0] || '').toString().trim().toLowerCase();
+        var valOtp = (rowVals[1] || '').toString().trim();
+        var valStatus = (rowVals[4] || '').toString().trim().toUpperCase();
+
+        if (valEmail === targetEmail && valOtp === otp && valStatus === 'ACTIVE') {
+          rowVerified = true;
+          rowInserted = true;
+          Logger.log('ROW VERIFICATION PASSED: Successfully stored and verified OTP in ' + sheetName + ' at row ' + lastRowAfter);
+        } else {
+          Logger.log('ROW VERIFICATION FAILED: Row values (' + valEmail + ', ' + valOtp + ', ' + valStatus + ') do not match expected.');
+        }
+      }
     } else {
-      Logger.log('CRITICAL: OTP_Store sheet could not be created or accessed!');
+      Logger.log('Sheet Found: false');
+      Logger.log('CRITICAL: 31_OTP_Store sheet could not be created or accessed!');
     }
   } catch (sheetErr) {
     Logger.log('OTP_Store Write Exception: ' + sheetErr.toString());
-    logSystemError('Authentication', 'generateAndSendOTP', sheetErr.toString(), '', targetEmail);
+    if (sheetErr.stack) {
+      Logger.log('Entire Exception Stack:\n' + sheetErr.stack);
+    }
+    logSystemError('Authentication', 'generateAndSendOTP', sheetErr.toString() + (sheetErr.stack ? '\n' + sheetErr.stack : ''), '', targetEmail);
+  }
+
+  // Abort if storage verification failed
+  if (!rowVerified || !rowInserted) {
+    Logger.log('CRITICAL: OTP row verification failed! Aborting email dispatch.');
+    return {
+      success: false,
+      reason: 'OTP row verification failed',
+      error: 'Failed to write or verify OTP row in 31_OTP_Store sheet',
+      sheetFound: sheetFound,
+      rowInserted: false,
+      emailSent: false,
+      message: 'OTP storage failed. Row verification in 31_OTP_Store failed.'
+    };
   }
 
   // Cache in Script Cache as fast backup layer
@@ -1235,6 +1303,9 @@ function generateAndSendOTP(email, name, customOtp) {
     userCache.put('OTP_' + targetEmail, otp, 600);
   } catch (cacheErr) {
     Logger.log('ScriptCache Warning: ' + cacheErr.toString());
+    if (cacheErr.stack) {
+      Logger.log('Cache Exception Stack:\n' + cacheErr.stack);
+    }
   }
 
   Logger.log('================== [OTP GENERATION & SAVE LOG] ==================');
@@ -1243,24 +1314,47 @@ function generateAndSendOTP(email, name, customOtp) {
   Logger.log('Email: ' + targetEmail);
   Logger.log('Created At: ' + createdAt);
   Logger.log('Expires At: ' + expiresAt);
-  Logger.log('OTP SHEET FOUND: ' + sheetFound);
-  Logger.log('ROW INSERTED: ' + rowInserted);
-  Logger.log('Expiry Status: VALID');
+  Logger.log('Spreadsheet Name: "' + ssName + '"');
+  Logger.log('Spreadsheet ID: "' + ssId + '"');
+  Logger.log('Sheet Found: ' + sheetFound);
+  Logger.log('Sheet Name: "' + sheetName + '"');
+  Logger.log('Sheet ID: "' + sheetId + '"');
+  Logger.log('Last Row BEFORE append: ' + lastRowBefore);
+  Logger.log('Last Row AFTER append: ' + lastRowAfter);
+  Logger.log('Inserted Row: ' + lastRowAfter);
+  Logger.log('Inserted Values: ' + JSON.stringify(insertedValues));
+  Logger.log('ROW VERIFIED: ' + rowVerified);
   Logger.log('==================================================================');
 
   var sendResult = sendCustomerOTPEmail(targetEmail, otp, custName);
+  var emailSent = Boolean(sendResult && sendResult.success !== false);
   Logger.log('EMAIL SENT RESULT: ' + JSON.stringify(sendResult));
 
-  logAuditTrail(targetEmail, 'OTP_GENERATED', '31_OTP_Store', 'OTP generated and dispatched to email: ' + targetEmail + ' (Sent: ' + (sendResult && sendResult.success) + ')');
+  if (!emailSent) {
+    Logger.log('CRITICAL: OTP email dispatch failed!');
+    return {
+      success: false,
+      reason: 'OTP email delivery failed',
+      error: sendResult ? sendResult.error : 'Unknown email error',
+      sheetFound: sheetFound,
+      rowInserted: true,
+      emailSent: false,
+      message: 'OTP generated and saved, but email delivery failed: ' + (sendResult ? sendResult.error : 'Unknown error')
+    };
+  }
+
+  logAuditTrail(targetEmail, 'OTP_GENERATED', '31_OTP_Store', 'OTP generated, verified in sheet at row ' + lastRowAfter + ', and emailed to ' + targetEmail);
 
   return { 
-    success: sendResult && sendResult.success !== false, 
+    success: true, 
     otp: otp, 
     recipient: targetEmail,
     sheetFound: sheetFound,
-    rowInserted: rowInserted,
-    emailSent: Boolean(sendResult && sendResult.success),
-    message: sendResult && sendResult.success !== false ? 'Login OTP verification code dispatched to ' + targetEmail : 'OTP generated, but email delivery failed: ' + (sendResult ? sendResult.error : 'Unknown error') 
+    rowInserted: true,
+    emailSent: true,
+    insertedRow: lastRowAfter,
+    insertedValues: insertedValues,
+    message: 'Login OTP verification code dispatched to ' + targetEmail
   };
 }
 
@@ -1269,7 +1363,7 @@ function verifyCustomerOTP(email, enteredOtp) {
   var inputOtp = (enteredOtp || '').toString().trim();
 
   var ss = getActiveSpreadsheet();
-  var otpSheet = ss.getSheetByName('OTP_Store') || ss.getSheetByName(SHEETS.OTP_STORE);
+  var otpSheet = ss ? (ss.getSheetByName('31_OTP_Store') || ss.getSheetByName('OTP_Store') || ss.getSheetByName(SHEETS.OTP_STORE)) : null;
   
   var foundInSheet = false;
   var storedOtpStr = '';
