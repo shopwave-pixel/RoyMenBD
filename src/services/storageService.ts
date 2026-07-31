@@ -84,11 +84,14 @@ export class StorageService {
   // --- 01 Settings ---
   static getSettings(): Settings {
     const stored = getStored<Settings>(KEYS.SETTINGS, initialSettings);
+    const PROD_GAS_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbySDKye3w4lRjP38lyWz5ix8oEOynNiRaesy7iGuK7Y3HS-NVh4-eENlDKlR_9zM8wn/exec';
+    
+    if (!stored.googleWebAppUrl || stored.googleWebAppUrl.includes('AKfycbx_') || stored.googleWebAppUrl !== PROD_GAS_WEB_APP_URL) {
+      stored.googleWebAppUrl = PROD_GAS_WEB_APP_URL;
+      setStored(KEYS.SETTINGS, stored);
+    }
     if (APP_CONFIG.SPREADSHEET_ID && !stored.googleSheetId) {
       stored.googleSheetId = APP_CONFIG.SPREADSHEET_ID;
-    }
-    if (APP_CONFIG.API_URL && !stored.googleWebAppUrl) {
-      stored.googleWebAppUrl = APP_CONFIG.API_URL;
     }
     return stored;
   }
@@ -345,36 +348,31 @@ export class StorageService {
       expiryStatus: 'VALID'
     });
 
-    const settings = this.getSettings();
-    const webAppUrl = settings.googleWebAppUrl || APP_CONFIG.API_URL;
+    const webAppUrl = 'https://script.google.com/macros/s/AKfycbySDKye3w4lRjP38lyWz5ix8oEOynNiRaesy7iGuK7Y3HS-NVh4-eENlDKlR_9zM8wn/exec';
 
-    if (webAppUrl) {
-      const payloadObj = {
-        action: 'sendOTP',
-        email: normEmail,
-        name: normEmail.split('@')[0],
-        otp: otp,
-        payload: { email: normEmail, name: normEmail.split('@')[0], otp: otp }
-      };
+    const payloadObj = {
+      action: 'sendOTP',
+      email: normEmail,
+      name: normEmail.split('@')[0],
+      otp: otp,
+      payload: { email: normEmail, name: normEmail.split('@')[0], otp: otp }
+    };
 
-      // 1. Dispatch POST request to Google Apps Script WebApp without mode: 'no-cors' to preserve body payload
-      fetch(webAppUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify(payloadObj)
-      }).catch(() => {
-        // Fallback GET ping only if POST fails
-        const getUrl = `${webAppUrl}${webAppUrl.includes('?') ? '&' : '?'}action=sendOTP&email=${encodeURIComponent(normEmail)}&otp=${encodeURIComponent(otp)}&name=${encodeURIComponent(normEmail.split('@')[0])}`;
-        fetch(getUrl, { method: 'GET' }).catch(err => console.log('GAS OTP GET fallback error:', err));
-      });
-    }
+    // 1. Dispatch POST request to Google Apps Script WebApp without mode: 'no-cors' to preserve body payload
+    fetch(webAppUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(payloadObj)
+    }).catch(() => {
+      // Fallback GET ping only if POST fails
+      const getUrl = `${webAppUrl}${webAppUrl.includes('?') ? '&' : '?'}action=sendOTP&email=${encodeURIComponent(normEmail)}&otp=${encodeURIComponent(otp)}&name=${encodeURIComponent(normEmail.split('@')[0])}`;
+      fetch(getUrl, { method: 'GET' }).catch(err => console.log('GAS OTP GET fallback error:', err));
+    });
 
     return {
       success: true,
       otp: otp,
-      message: webAppUrl
-        ? `An OTP verification code has been dispatched to ${normEmail} via ROYMEN Concierge Mailer.`
-        : `Verification code generated for ${normEmail}. (Note: To receive actual emails, configure your Google Apps Script WebApp URL in Settings)`
+      message: `An OTP verification code has been dispatched to ${normEmail} via ROYMEN Concierge Mailer.`
     };
   }
 
@@ -907,11 +905,7 @@ export class StorageService {
 
   // --- Google Sheets WebHook Sync Controller ---
   static async triggerGoogleSheetSync(action: string, payload: any): Promise<{ success: boolean; message: string }> {
-    const settings = this.getSettings();
-    const webAppUrl = settings.googleWebAppUrl || APP_CONFIG.API_URL;
-    if (!webAppUrl) {
-      return { success: false, message: 'No Google Sheets WebApp URL configured.' };
-    }
+    const webAppUrl = 'https://script.google.com/macros/s/AKfycbySDKye3w4lRjP38lyWz5ix8oEOynNiRaesy7iGuK7Y3HS-NVh4-eENlDKlR_9zM8wn/exec';
 
     try {
       // 1. Dispatch POST request

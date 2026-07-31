@@ -30,7 +30,7 @@ export const initialSettings: Settings = {
   contactPhone: '+880 1700-998877',
   address: 'Level 4, ROYMEN Atelier, Gulshan Avenue, Dhaka-1212, Bangladesh',
   googleSheetId: '1ROYMEN_ENTERPRISE_SHEET_MASTER_2026',
-  googleWebAppUrl: 'https://script.google.com/macros/s/AKfycbx_ROYMEN_GAS_REST_API/exec',
+  googleWebAppUrl: 'https://script.google.com/macros/s/AKfycbySDKye3w4lRjP38lyWz5ix8oEOynNiRaesy7iGuK7Y3HS-NVh4-eENlDKlR_9zM8wn/exec',
   autoSyncGoogleSheets: true,
   bkashMerchantNumber: '01700998877',
   nagadMerchantNumber: '01800998877'

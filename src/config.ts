@@ -3,7 +3,7 @@
 
 export const APP_CONFIG = {
   SPREADSHEET_ID: "",
-  API_URL: "",
+  API_URL: "https://script.google.com/macros/s/AKfycbySDKye3w4lRjP38lyWz5ix8oEOynNiRaesy7iGuK7Y3HS-NVh4-eENlDKlR_9zM8wn/exec",
   APP_NAME: "ROYMEN",
   TAGLINE: "Wear Confidence.",
   COUNTRY: "Bangladesh",
